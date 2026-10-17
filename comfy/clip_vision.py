@@ -69,16 +69,23 @@ class ClipVisionModel():
         comfy.model_management.load_model_gpu(self.patcher)
         # 分块编码：显存激活随帧数线性涨，长视频整批上卡会爆显存。帧间没有注意力联系，分块数学等价。
         outputs = None
+        tensor_outputs = {}
         for i in range(0, image.shape[0], batch_size):
             chunk = self.encode_image_chunk(image[i:i + batch_size], crop)
             if outputs is None:
                 outputs = chunk
+                for key in vars(outputs):
+                    if key != "image_sizes" and outputs[key] is not None:
+                        tensor_outputs[key] = [outputs[key]]
                 continue
             for key in vars(outputs):
                 if key == "image_sizes":
-                    outputs[key] = outputs[key] + chunk[key]
+                    outputs[key].extend(chunk[key])
                 elif outputs[key] is not None:
-                    outputs[key] = torch.cat([outputs[key], chunk[key]], dim=0)
+                    tensor_outputs[key].append(chunk[key])
+        for key, tensors in tensor_outputs.items():
+            if len(tensors) > 1:
+                outputs[key] = torch.cat(tensors, dim=0)
         return outputs
 
     def encode_image_chunk(self, image, crop=True):
@@ -99,7 +106,10 @@ class ClipVisionModel():
         else:
             outputs["penultimate_hidden_states"] = out[1].to(comfy.model_management.intermediate_device())
 
-        outputs["mm_projected"] = out[3]
+        if out[3] is not None:
+            outputs["mm_projected"] = out[3].to(comfy.model_management.intermediate_device())
+        else:
+            outputs["mm_projected"] = None
         return outputs
 
 def convert_to_transformers(sd, prefix):
