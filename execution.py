@@ -25,29 +25,6 @@ from latent_preview import set_preview_method
 import nodes
 
 
-# [显存日志] 节点级显存快照：torch 分配/保留 + 设备剩余 + 系统RAM可用
-def _vram_line():
-    free, _total = torch.cuda.mem_get_info()
-    import psutil
-    return (f"torch占用={torch.cuda.memory_allocated()/2**20:.0f}MB "
-            f"torch保留={torch.cuda.memory_reserved()/2**20:.0f}MB "
-            f"设备剩余={free/2**20:.0f}MB "
-            f"RAM可用={psutil.virtual_memory().available/2**20:.0f}MB")
-
-
-# [显存日志] 节点级降噪：显存相对上次节点日志变化 <64MB 就不打（Constant 节点、纯 CPU 节点等）
-_vram_last_snapshot = [-1e9, -1e9, -1e9]
-
-
-def _vram_changed():
-    free, _total = torch.cuda.mem_get_info()
-    cur = (torch.cuda.memory_allocated(), torch.cuda.memory_reserved(), free)
-    if all(abs(a - b) < 64 * 2**20 for a, b in zip(cur, _vram_last_snapshot)):
-        return False
-    _vram_last_snapshot[:] = cur
-    return True
-
-
 from comfy_execution.caching import (
     BasicCache,
     CacheKeySetID,
@@ -516,9 +493,6 @@ async def execute(server: "ExecutionServer", dynprompt, caches, current_item, ex
             has_subgraph = False
         else:
             get_progress_state().start_progress(unique_id)
-            # [显存日志] 节点开始
-            if _vram_changed():
-                logging.info(f"[显存] {class_type}#{display_node_id} 开始: {_vram_line()}")
             input_data_all, missing_keys, v3_data = get_input_data(inputs, class_def, unique_id, execution_list, dynprompt, extra_data)
             if server.client_id is not None:
                 server.last_node_id = display_node_id
@@ -581,9 +555,6 @@ async def execute(server: "ExecutionServer", dynprompt, caches, current_item, ex
                     comfy.model_prefetch.cleanup_prefetch_queues()
                     comfy.model_management.reset_cast_buffers()
                     comfy_aimdo.model_vbar.vbars_reset_watermark_limits()
-                # [显存日志] 节点结束（aimdo 清理后）
-                if _vram_changed():
-                    logging.info(f"[显存] {class_type}#{display_node_id} 结束: {_vram_line()}")
 
             if has_pending_tasks:
                 pending_async_nodes[unique_id] = output_data
