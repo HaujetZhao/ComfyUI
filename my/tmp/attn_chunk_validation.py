@@ -20,11 +20,11 @@ freqs = torch.randn(B, S, 1, DIM // HEADS // 2, 2, 2, device="cuda", dtype=torch
 
 with torch.inference_mode():
     m.BLOCK_CHUNK_MIN_SEQ = 10**9  # 全量路径
-    full = block(x, e, freqs, context)
+    full = block(x.clone(), e.clone(), freqs.clone(), context.clone())
     m.BLOCK_CHUNK_MIN_SEQ = 64     # 分块路径
     m.SELF_ATTN_CHUNK = 33
     m.FFN_CHUNK = 33
-    chunked = block(x, e, freqs, context)
+    chunked = block(x.clone(), e.clone(), freqs.clone(), context.clone())
 
 diff = (full - chunked).abs().max().item()
 scale = full.abs().max().item()

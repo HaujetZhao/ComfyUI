@@ -346,11 +346,12 @@ class WanAttentionBlock(nn.Module):
         if probe is not None:
             probe("self_attn")
 
-        x = torch.addcmul(x, y, repeat_e(e[2], x))
+        # 残差原地写回（issue #1969 策略 III）：省一份 [B,S,C] 的相和瞬时
+        x.addcmul_(y, repeat_e(e[2], x))
         del y
 
         # cross-attention & ffn
-        x = x + self.cross_attn(self.norm3(x), context, context_img_len=context_img_len, transformer_options=transformer_options)
+        x.add_(self.cross_attn(self.norm3(x), context, context_img_len=context_img_len, transformer_options=transformer_options))
 
         if "attn2_patch" in patches:
             for p in patches["attn2_patch"]:
