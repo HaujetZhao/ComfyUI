@@ -1,0 +1,65 @@
+diff --git a/comfy/clip_vision.py b/comfy/clip_vision.py
+index d270d09..10401fd 100644
+--- a/comfy/clip_vision.py
++++ b/comfy/clip_vision.py
+@@ -3,6 +3,8 @@ import os
+ import json
+ import logging
+ 
++import torch
++
+ import comfy.ops
+ import comfy.model_patcher
+ import comfy.model_management
+@@ -63,8 +65,23 @@ class ClipVisionModel():
+     def get_sd(self):
+         return self.model.state_dict()
+ 
+-    def encode_image(self, image, crop=True):
++    def encode_image(self, image, crop=True, batch_size=64):
+         comfy.model_management.load_model_gpu(self.patcher)
++        # 分块编码：显存激活随帧数线性涨，长视频整批上卡会爆显存。帧间没有注意力联系，分块数学等价。
++        outputs = None
++        for i in range(0, image.shape[0], batch_size):
++            chunk = self.encode_image_chunk(image[i:i + batch_size], crop)
++            if outputs is None:
++                outputs = chunk
++                continue
++            for key in vars(outputs):
++                if key == "image_sizes":
++                    outputs[key] = outputs[key] + chunk[key]
++                elif outputs[key] is not None:
++                    outputs[key] = torch.cat([outputs[key], chunk[key]], dim=0)
++        return outputs
++
++    def encode_image_chunk(self, image, crop=True):
+         if self.model_type == "siglip2_vision_model":
+             pixel_values = comfy.clip_model.siglip2_preprocess(image.to(self.load_device), size=self.image_size, patch_size=self.config.get("patch_size", 16), num_patches=self.config.get("num_patches", 256), mean=self.image_mean, std=self.image_std, crop=crop).float()
+         else:
+diff --git a/nodes.py b/nodes.py
+index c0dd556..17b5a38 100644
+--- a/nodes.py
++++ b/nodes.py
+@@ -1093,18 +1093,19 @@ class CLIPVisionEncode:
+     def INPUT_TYPES(s):
+         return {"required": { "clip_vision": ("CLIP_VISION",),
+                               "image": ("IMAGE",),
+-                              "crop": (["center", "none"],)
++                              "crop": (["center", "none"],),
++                              "batch_size": ("INT", {"default": 64, "min": 1, "max": 4096, "step": 1})
+                              }}
+     RETURN_TYPES = ("CLIP_VISION_OUTPUT",)
+     FUNCTION = "encode"
+ 
+     CATEGORY = "model/conditioning"
+ 
+-    def encode(self, clip_vision, image, crop):
++    def encode(self, clip_vision, image, crop, batch_size):
+         crop_image = True
+         if crop != "center":
+             crop_image = False
+-        output = clip_vision.encode_image(image, crop=crop_image)
++        output = clip_vision.encode_image(image, crop=crop_image, batch_size=batch_size)
+         return (output,)
+ 
+ class StyleModelLoader:

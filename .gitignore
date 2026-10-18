@@ -26,5 +26,5 @@ uv.lock
 .comfy_environment
 /previews/
 
-/my/
+# /my/  2026-10-18 起入库存档（显存测试脚本与流式补丁副本）
 /最新报错.txt
