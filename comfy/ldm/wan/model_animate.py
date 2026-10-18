@@ -1,4 +1,6 @@
 from torch import nn
+import logging
+import time
 import torch
 from typing import Tuple, Optional
 from einops import rearrange
@@ -534,6 +536,8 @@ class AnimateWanModel(WanModel):
         blocks_replace = patches_replace.get("dit", {})
         transformer_options["total_blocks"] = len(self.blocks)
         transformer_options["block_type"] = "double"
+        block_t0 = time.perf_counter()
+        torch.cuda.reset_peak_memory_stats()
         for i, block in enumerate(self.blocks):
             transformer_options["block_index"] = i
             if ("double_block", i) in blocks_replace:
@@ -550,6 +554,15 @@ class AnimateWanModel(WanModel):
                 for p in patches["double_block"]:
                     out = p({"img": x, "x": x_input, "vec": e, "block_index": i, "img_offset": img_offset, "transformer_options": transformer_options})
                     x = out["img"]
+
+            # 逐层显存/耗时日志：按窗口内各层耗时估算剩余时间
+            t = time.perf_counter()
+            free, _total = torch.cuda.mem_get_info()
+            logging.info(f"[block {i:2d}] 耗时={t - block_t0:5.2f}s 峰值={torch.cuda.max_memory_allocated() / 2**20:5.0f}MB "
+                         f"torch占用={torch.cuda.memory_allocated() / 2**20:5.0f}MB torch保留={torch.cuda.memory_reserved() / 2**20:5.0f}MB "
+                         f"设备剩余={free / 2**20:4.0f}MB")
+            torch.cuda.reset_peak_memory_stats()
+            block_t0 = t
 
             if i % 5 == 0 and motion_vec is not None:
                 x = x + self.face_adapter.fuser_blocks[i // 5](x, motion_vec)
