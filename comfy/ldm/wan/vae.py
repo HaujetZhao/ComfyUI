@@ -13,6 +13,17 @@ ops = comfy.ops.disable_weight_init
 CACHE_T = 2
 
 
+def _vram_line(tag):  # [显存日志] 时间块级显存快照
+    import logging
+    free, _total = torch.cuda.mem_get_info()
+    logging.info(f"[显存日志] {tag} torch占用={torch.cuda.memory_allocated()/2**20:.0f}MB "
+                 f"torch保留={torch.cuda.memory_reserved()/2**20:.0f}MB 设备剩余={free/2**20:.0f}MB")
+
+
+def _chunk_log_enabled(i, iter_):  # 前2块 + 每10块 + 最后一块，防刷屏
+    return i <= 2 or i % 10 == 0 or i == iter_ - 1
+
+
 class CausalConv3d(ops.Conv3d):
     """
     Causal 3d convolusion.
@@ -430,6 +441,7 @@ def count_cache_layers(model):
 
 
 class WanVAE(nn.Module):
+    comfy_has_chunked_io = True
 
     def __init__(self,
                  dim=128,
@@ -449,6 +461,7 @@ class WanVAE(nn.Module):
         self.attn_scales = attn_scales
         self.temperal_downsample = temperal_downsample
         self.temperal_upsample = temperal_downsample[::-1]
+        self.conv_out_channels = conv_out_channels
 
         # modules
         self.encoder = Encoder3d(dim, z_dim * 2, image_channels, dim_mult, num_res_blocks,
@@ -458,7 +471,10 @@ class WanVAE(nn.Module):
         self.decoder = Decoder3d(dim, z_dim, conv_out_channels, dim_mult, num_res_blocks,
                                  attn_scales, self.temperal_upsample, dropout)
 
-    def encode(self, x):
+    def encode(self, x, device=None):
+        # comfy_has_chunked_io 约定：x 可整体驻留 CPU，按时间块逐块上卡（chunked_io 路径由调用方传入 device）
+        if device is None:
+            device = x.device
         conv_idx = [0]
         ## cache
         t = x.shape[2]
@@ -472,29 +488,44 @@ class WanVAE(nn.Module):
             conv_idx = [0]
             if i == 0:
                 out = self.encoder(
-                    x[:, :, :1, :, :],
+                    x[:, :, :1, :, :].to(device),
                     feat_cache=feat_map,
                     feat_idx=conv_idx)
             else:
                 out_ = self.encoder(
-                    x[:, :, 1 + 2 * (i - 1):1 + 2 * i, :, :],
+                    x[:, :, 1 + 2 * (i - 1):1 + 2 * i, :, :].to(device),
                     feat_cache=feat_map,
                     feat_idx=conv_idx,
                     final=(i == (iter_ - 1)))
                 if out_ is None:
+                    if _chunk_log_enabled(i, iter_):
+                        _vram_line(f"WanVAE.encode 块{i}/{iter_}(空)")
                     continue
                 out = torch.cat([out, out_], 2)
+            if _chunk_log_enabled(i, iter_):
+                _vram_line(f"WanVAE.encode 块{i}/{iter_}")
 
         mu, log_var = self.conv1(out).chunk(2, dim=1)
         return mu
 
-    def decode(self, z):
-        # z: [b,c,t,h,w]
+    def decode_output_shape(self, input_shape):
+        # latent (b, z_dim, t, h, w) -> 像素 (b, 3, (t-1)*4+1, h*8, w*8)
+        b, _, t, h, w = input_shape
+        t_mul = 2 ** sum(self.temperal_upsample)
+        s_mul = 2 ** (len(self.dim_mult) - 1)
+        return (b, self.conv_out_channels, (t - 1) * t_mul + 1, h * s_mul, w * s_mul)
+
+    def decode(self, z, output_buffer=None):
+        # z: [b,c,t,h,w]; comfy_has_chunked_io 约定：给了 output_buffer 就逐块写入，
+        # 显存里不再攒整段像素（没有 buffer 时自行分配，行为与旧 torch.cat 等价）
+        if output_buffer is None:
+            output_buffer = torch.empty(self.decode_output_shape(z.shape), device=z.device, dtype=z.dtype)
         iter_ = 1 + z.shape[2] // 2
         feat_map = None
         if iter_ > 1:
             feat_map = [None] * count_cache_layers(self.decoder)
         x = self.conv2(z)
+        pos = 0
         for i in range(iter_):
             conv_idx = [0]
             if i == 0:
@@ -503,9 +534,13 @@ class WanVAE(nn.Module):
                     feat_cache=feat_map,
                     feat_idx=conv_idx)
             else:
-                out_ = self.decoder(
+                out = self.decoder(
                     x[:, :, 1 + 2 * (i - 1):1 + 2 * i, :, :],
                     feat_cache=feat_map,
                     feat_idx=conv_idx)
-                out += out_
-        return torch.cat(out, 2)
+            for p in out:
+                output_buffer[:, :, pos:pos + p.shape[2], :, :].copy_(p)
+                pos += p.shape[2]
+            if _chunk_log_enabled(i, iter_):
+                _vram_line(f"WanVAE.decode 块{i}/{iter_}")
+        return output_buffer
