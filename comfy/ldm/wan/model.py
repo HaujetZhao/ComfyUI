@@ -295,6 +295,9 @@ class WanAttentionBlock(nn.Module):
         y = self.self_attn(
             modulate(x, self.norm1, e[0], e[1]),
             freqs, transformer_options=transformer_options)
+        probe = transformer_options.get("vram_stage_probe")
+        if probe is not None:
+            probe("self_attn")
 
         x = torch.addcmul(x, y, repeat_e(e[2], x))
         del y
@@ -306,8 +309,13 @@ class WanAttentionBlock(nn.Module):
             for p in patches["attn2_patch"]:
                 x = p({"x": x, "transformer_options": transformer_options})
 
+        if probe is not None:
+            probe("cross_attn")
+
         y = self.ffn(modulate(x, self.norm2, e[3], e[4]))
         x = torch.addcmul(x, y, repeat_e(e[5], x))
+        if probe is not None:
+            probe("ffn")
         return x
 
 

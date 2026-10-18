@@ -155,7 +155,16 @@ def dump_cuda_tensors(tag, top=15):
 
 
 _block_state = {"n": 0, "t0": None, "dumped": False}
-REPORT_BLOCKS = 40  # 只报第一个 window 的前 40 个 block，之后静默
+REPORT_BLOCKS = 40    # 只报第一个 window 的前 40 个 block，之后静默
+STAGE_PROBE_BLOCKS = 5  # 前 5 层报 block 内分阶段峰值（self_attn/cross_attn/ffn），0=关
+
+
+def _stage_probe(name):
+    """挂在 transformer_options['vram_stage_probe']：读当前峰值并重置，分解 block 内峰值归属"""
+    if _block_state["n"] <= STAGE_PROBE_BLOCKS:
+        peak = torch.cuda.max_memory_allocated() / 2**20
+        print(f"    [{_block_state['n']:2d} {name:10s}] 阶段峰值={peak:5.0f}MB", flush=True)
+    torch.cuda.reset_peak_memory_stats()
 
 
 def _block_probe(args):
@@ -211,8 +220,11 @@ def main():
     comfy.context_windows.create_prepare_sampling_wrapper(patcher)
 
     # block 级探针：走主线留的 double_block patch 口，不改模型代码
+    t_opts = patcher.model_options.setdefault("transformer_options", {})
     if DUMP_BLOCK is not None:
-        patcher.model_options.setdefault("transformer_options", {}).setdefault("patches", {})["double_block"] = [_block_probe]
+        t_opts.setdefault("patches", {})["double_block"] = [_block_probe]
+    if STAGE_PROBE_BLOCKS:
+        t_opts["vram_stage_probe"] = _stage_probe
 
     # 随机构造 conds（语义无关，只对显存结构负责）。键名对应 WAN22_Animate.extra_conds 的读取
     with torch.inference_mode():  # server 在 execution.py 全程 inference_mode，必须对齐
