@@ -136,17 +136,56 @@ Wan 2.1 生成 720p 150 帧视频时序列长达 **54.7 万 token**。标准实�
 
 ---
 
-# 实现对照（wan-attention-stream 分支，2026-10-18）
+# 实现对照（wan-attention-stream 分支，2026-10-18 完结）
 
-| 文档策略 | 状态 | 说明 |
-|---|---|---|
-| III Phase B：Q 分块 attention，KV 全量驻留 | ✅ 已实现 | `5432e4e`，self_attn；`63805e9` 举一反三到 cross_attn（文档未明说 cross_attn，但同一思路） |
-| III Phase A：K/V 分块投影写预分配 buffer | 🔨 进行中 | 第 4 刀（调制下放 + K/V 分块投影），数值校验未通过，调试中 |
-| III 直接写回：attention 输出原地加回 | ⬜ 未做 | block 里仍是 `x = x + cross_attn(...)`，可改 `x.add_(y)` 省 210MB |
-| FFN 按 token 分块 + 原地 addcmul | ✅ 已实现（文档外延） | `6b8b314`，文档没提 FFN，是同思路延伸 |
-| I：主 latent X CPU 驻留（>65536 token） | ⬜ 未做 | 512×512（21504 token）不触发；高分辨率再说 |
-| II：逐帧 patch embedding | ⬜ 未做 | 同上，点火阶段一次性开销，高分辨率才显著 |
-| IV：注入 gc.collect/empty_cache | ⬜ 不做 | dirty hack，与 aimdo 动态加载叠加后行为难推理；先看不做能压到多少 |
-| V：min-slicing 空间对齐 | ⬜ 不适用 | 补丁处理 pose latent 对齐的鲁棒性问题，我们未遇到 |
+## 最终落地清单（7 刀全部完成）
+
+| # | 改进 | 提交 | 720p 实测收益 |
+|---|---|---|---|
+| 1 | 基线 + 逐层探针（double_block patch + 阶段探针） | `0601e08` | — |
+| 2 | Q 分块 attention（III Phase B），K/V 全量驻留 | `5432e4e` | 省全量 q/输出 |
+| 3 | cross-attention q 分块（含 img 分支） | `63805e9` | 1588→1384MB |
+| 4 | FFN 按 token 分块 + 原地 addcmul | `6b8b314` | 2364→1104MB |
+| 5 | 调制下放 + K/V 分块投影写 buffer（III Phase A，两轮循环） | `4585a83` | 1498→1328MB |
+| 6 | 残差原地写回（addcmul_/add_） | `8f80dc0` | 各段再省 210MB |
+| 7 | 策略 III 完全体：消灭 y buffer，attention 输出逐块直接写回 x | `751bd66` | self -680 / cross -699MB |
+
+## 分辨率档位最终数据（块级峰值，torch allocated 口径）
+
+| 段 | 512×512 (21504 tok) | 1024×512 (43008 tok) | 1280×720 (75600 tok) |
+|---|---|---|---|
+| self_attn | 1328→**1118** | 2326→~1900 | 3831→**3151** |
+| cross_attn | 1174→**964** | 1963→~1540 | 3149→**2450** |
+| ffn | 894 | 1262 | 1879 |
+| 耗时/层 | 1.12s | 2.89s | 7.3s（无损） |
+
+（→ 后为第 6/7 刀的推算值；720p 为实测。）
+
+## Server 实测（2026-10-18，512×512×81，6 步）
+
+- CUDA 全程 90%~100% 平稳，专用+共享显存合计 <7GB，画质逐帧对比优化前正常。
+- 设备剩余日志曾探底 0MB 但 torch 只占 ~1GB——WDDM 把权重 mmap 页计入设备占用的
+  记账口径，无性能影响，不用管。
+
+## 未做（对照文档）
+
+- **策略 I**（x 驻留 CPU，>65536 token）：720p 已触发阈值但实测够用；做的话所有逐块
+  读 x 变 H2D、写回变 D2H，速度与 RAM 都是代价（aimdo 的 RAM 流失还没查清，不往 RAM 上堆）。
+- **策略 II**（逐帧 patch embedding）：点火阶段一次性开销，需要时再做。
+- **策略 IV**（gc/empty_cache 注入）：dirty hack，不做。
+- **策略 V**（min-slicing）：未遇到对齐问题，不适用。
+
+## 踩坑记录
+
+- **K/V 分块投影必须两轮循环**：self-attention 每个 q 块要对全量 K/V 做 attention，
+  单轮合并时第 i 块 attention 读到的 k_buf 后半还是 `torch.empty` 垃圾（校验误差 0.48
+  当场抓出）。3 月补丁分两轮正是为此。
+- `AttentionTensorContainer` 是一次性消费壳（`take()` 后标记 consumed），k/v 循环多轮、
+  i2v 的 q 同块喂两次，都要在循环内重建零拷贝薄壳。
+- 残差原地写回后，block 会原地改输入 x——数值校验脚本同一批张量跑两遍会互相污染，
+  每次前向必须 clone 输入。
+- WanAnimateToVideo 的 latent 总帧数 = 1（参考图 latent）+ 内容 latent，context window
+  报的帧数比 `(length-1)/4+1` 多 1 是正常的，ref 帧由 retain_first_frame 保留、
+  trim_latent 在采样后裁掉。
 
 
