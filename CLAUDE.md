@@ -27,6 +27,12 @@
 - flash-attn 不要升级到 torch 2.13/2.14 对应版本再折腾——等社区有 wheel 再说。
 - 根目录 `constraints.txt`（pin 旧版 torch 2.14+cu132）已过时，忽略它。
 
+## 显存调试
+
+- **模型前向必须包 `torch.inference_mode()`**：server 在 execution.py 把整个工作流包在里面，裸测试脚本不包的话 autograd 会逐块保留全部激活（实测每 2 帧块 +7GB），直接爆显存蓝屏。`torch.no_grad()` 不等价（inference tensor 语义）。
+- 裸脚本复刻 server 显存行为的完整清单（aimdo 初始化顺序、sys.argv 注入、WDDM 溢出护栏等）：[doc/裸脚本复刻ComfyUI显存行为.md](doc/裸脚本复刻ComfyUI显存行为.md)，现成脚本 `my/vae_encode_vram_test.py`。
+- 仓库内临时加了 `[显存日志]` 埋点（cli_args.py 启动参数、execution.py 节点级、comfy/sd.py VAE encode/decode、comfy/ldm/wan/vae.py 时间块级），查完显存用 `git diff` 定位还原。
+
 ## StreamingVAE + StreamlinedAttention 补丁（2026-10 移植）
 
 - 分支 `streaming-vae-attention-0310`，基线 `535c16c`（2026-03-09/10），提交 `68992df`。源自 issue #1969 的 zip 补丁（`my/` 下有原件）。
