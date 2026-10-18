@@ -15,6 +15,11 @@ import comfy.ops
 import comfy.patcher_extension
 import comfy.quant_ops
 
+# WanSelfAttention Q 分块（issue kijai/ComfyUI-WanVideoWrapper#1969 策略 III）：
+# 序列达到阈值才启用。512×512×81 窗口=21504 不启用，1024×512×81=43008 启用
+SELF_ATTN_CHUNK = 4096
+SELF_ATTN_CHUNK_MIN_SEQ = 32768
+
 
 def sinusoidal_embedding_1d(dim, position):
     # preprocess
@@ -69,18 +74,39 @@ class WanSelfAttention(nn.Module):
 
         b, s, n, d = *x.shape[:2], self.num_heads, self.head_dim
 
-        def qkv_fn_q(x):
-            q = self.norm_q(self.q(x)).view(b, s, n, d)
-            return apply_rope1(q, freqs)
+        def qkv_fn_q(xs, fs):
+            q = self.norm_q(self.q(xs)).view(b, -1, n, d)
+            return apply_rope1(q, fs)
 
         def qkv_fn_k(x):
             k = self.norm_k(self.k(x)).view(b, s, n, d)
             return apply_rope1(k, freqs)
 
+        if s >= SELF_ATTN_CHUNK_MIN_SEQ and not patches.get("attn1_patch"):
+            # Q 分块（issue kijai/ComfyUI-WanVideoWrapper#1969 策略 III）：
+            # K/V 全量驻留，Q 逐块投影+rope+attention+o，结果逐块写入预分配 buffer。
+            # 省掉 q 全量、attention 输出、o 输出三份 [B,S,C] 瞬时激活（43008 token 时约省 1.2GB/层）
+            k = qkv_fn_k(x).view(b, s, n * d)
+            v = self.v(x).view(b, s, n * d)
+            y = torch.empty_like(x)
+            for s0 in range(0, s, SELF_ATTN_CHUNK):
+                s1 = min(s0 + SELF_ATTN_CHUNK, s)
+                qc = qkv_fn_q(x[:, s0:s1], freqs[:, s0:s1])
+                attn = optimized_attention(
+                    AttentionTensorContainer(qc.reshape(b, s1 - s0, n * d)),
+                    AttentionTensorContainer(k),
+                    AttentionTensorContainer(v),
+                    heads=self.num_heads,
+                    preferred_attention=self.comfy_attention,
+                    transformer_options=transformer_options,
+                )
+                y[:, s0:s1] = self.o(attn)
+            return y
+
         #These two are VRAM hogs, so we want to do all of q computation and
         #have pytorch garbage collect the intermediates on the sub function
         #return before we touch k
-        q = qkv_fn_q(x)
+        q = qkv_fn_q(x, freqs)
         k = qkv_fn_k(x)
 
         if patches.get("attn1_patch"):
