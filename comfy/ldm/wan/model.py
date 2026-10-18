@@ -16,9 +16,9 @@ import comfy.patcher_extension
 import comfy.quant_ops
 
 # WanSelfAttention Q 分块（issue kijai/ComfyUI-WanVideoWrapper#1969 策略 III）：
-# 序列达到阈值才启用。512×512×81 窗口=21504 不启用，1024×512×81=43008 启用
+# 序列达到阈值才启用。512×512×81 窗口=21504、1024×512×81=43008 均启用
 SELF_ATTN_CHUNK = 4096
-SELF_ATTN_CHUNK_MIN_SEQ = 32768
+SELF_ATTN_CHUNK_MIN_SEQ = 8192
 
 
 def sinusoidal_embedding_1d(dim, position):
