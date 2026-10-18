@@ -1276,12 +1276,6 @@ class VAE:
                 free_memory = self.patcher.get_free_memory(self.device)
                 batch_number = int(free_memory / memory_used)
                 batch_number = max(1, batch_number)
-                # [显存日志] decode 估计与实际显存
-                import torch as _torch
-                _free, _total = _torch.cuda.mem_get_info()
-                logging.info(f"[显存日志] VAE.decode shape={tuple(samples_in.shape)} dtype={self.vae_dtype} "
-                             f"估计={memory_used/2**20:.0f}MB free_memory={free_memory/2**20:.0f}MB batch={batch_number} "
-                             f"设备剩余={_free/2**20:.0f}MB")
 
                 # A VAE with a reliable estimate skips the doomed untiled attempt.
                 if getattr(self.first_stage_model, "comfy_decode_estimate_is_reliable", False):
@@ -1312,7 +1306,7 @@ class VAE:
                     self.process_output(pixel_samples[x:x+batch_number])
             except Exception as e:
                 model_management.raise_non_oom(e)
-                logging.warning("Warning: Ran out of memory when regular VAE decoding, retrying with tiled VAE decoding. 原始异常: {}".format(e))
+                logging.warning("Warning: Ran out of memory when regular VAE decoding, retrying with tiled VAE decoding.")
                 #NOTE: We don't know what tensors were allocated to stack variables at the time of the
                 #exception and the exception itself refs them all until we get out of this except block.
                 #So we just set a flag for tiler fallback so that tensor gc can happen once the
@@ -1438,12 +1432,6 @@ class VAE:
                 free_memory = self.patcher.get_free_memory(self.device)
                 batch_number = int(free_memory / max(1, memory_used))
                 batch_number = max(1, batch_number)
-                # [显存日志] encode 估计与实际显存
-                import torch as _torch
-                _free, _total = _torch.cuda.mem_get_info()
-                logging.info(f"[显存日志] VAE.encode shape={tuple(pixel_samples.shape)} dtype={self.vae_dtype} "
-                             f"估计={memory_used/2**20:.0f}MB free_memory={free_memory/2**20:.0f}MB batch={batch_number} "
-                             f"设备剩余={_free/2**20:.0f}MB")
                 samples = None
                 for x in range(0, pixel_samples.shape[0], batch_number):
                     pixels_in = self.process_input(pixel_samples[x:x + batch_number]).to(self.vae_dtype)
@@ -1459,8 +1447,7 @@ class VAE:
 
             except Exception as e:
                 model_management.raise_non_oom(e)
-                # [显存日志] 带上原始异常文本，看真正的分配请求
-                logging.warning("Warning: Ran out of memory when regular VAE encoding, retrying with tiled VAE encoding. 原始异常: {}".format(e))
+                logging.warning("Warning: Ran out of memory when regular VAE encoding, retrying with tiled VAE encoding.")
                 #NOTE: We don't know what tensors were allocated to stack variables at the time of the
                 #exception and the exception itself refs them all until we get out of this except block.
                 #So we just set a flag for tiler fallback so that tensor gc can happen once the

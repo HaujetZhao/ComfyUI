@@ -13,16 +13,6 @@ ops = comfy.ops.disable_weight_init
 CACHE_T = 2
 
 
-def _vram_line(tag):  # [显存日志] 时间块级显存快照
-    import logging
-    free, _total = torch.cuda.mem_get_info()
-    logging.info(f"[显存日志] {tag} torch占用={torch.cuda.memory_allocated()/2**20:.0f}MB "
-                 f"torch保留={torch.cuda.memory_reserved()/2**20:.0f}MB 设备剩余={free/2**20:.0f}MB")
-
-
-def _chunk_log_enabled(i, iter_):  # 前2块 + 每10块 + 最后一块，防刷屏
-    return i <= 2 or i % 10 == 0 or i == iter_ - 1
-
 
 class CausalConv3d(ops.Conv3d):
     """
@@ -498,12 +488,8 @@ class WanVAE(nn.Module):
                     feat_idx=conv_idx,
                     final=(i == (iter_ - 1)))
                 if out_ is None:
-                    if _chunk_log_enabled(i, iter_):
-                        _vram_line(f"WanVAE.encode 块{i}/{iter_}(空)")
                     continue
                 out = torch.cat([out, out_], 2)
-            if _chunk_log_enabled(i, iter_):
-                _vram_line(f"WanVAE.encode 块{i}/{iter_}")
 
         mu, log_var = self.conv1(out).chunk(2, dim=1)
         return mu
@@ -541,6 +527,4 @@ class WanVAE(nn.Module):
             for p in out:
                 output_buffer[:, :, pos:pos + p.shape[2], :, :].copy_(p)
                 pos += p.shape[2]
-            if _chunk_log_enabled(i, iter_):
-                _vram_line(f"WanVAE.decode 块{i}/{iter_}")
         return output_buffer

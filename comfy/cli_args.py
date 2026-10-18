@@ -1,7 +1,6 @@
 import argparse
 import enum
 import os
-import sys
 import comfy.options
 
 
@@ -288,11 +287,6 @@ if comfy.options.args_parsing:
 else:
     args = parser.parse_args([])
 
-# [显存日志] 启动参数快照：供显存测试脚本还原服务端行为
-import logging as _logging
-_mem_keys = [k for k in vars(args) if any(s in k for s in ("vram", "mem", "cache", "fast_disk", "pinned", "dynamic", "reserve", "novram", "lowvram", "cpu"))]
-_logging.info("[显存日志] 启动参数: %s", " ".join(sys.argv[1:]))
-_logging.info("[显存日志] 内存相关配置: %s", {k: getattr(args, k) for k in sorted(_mem_keys)})
 
 if args.cache_ram is not None and len(args.cache_ram) > 2:
     parser.error("--cache-ram accepts at most two values: active GB and inactive GB")
