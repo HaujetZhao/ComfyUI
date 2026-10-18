@@ -12,7 +12,7 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ===== 可改参数 =====
-WIDTH = 1024        # 像素宽，8 的倍数
+WIDTH = 512         # 像素宽，8 的倍数
 HEIGHT = 512        # 像素高
 FRAMES = 151        # 目标像素帧数，latent 帧数 = (FRAMES-1)//4+1
 MODEL_PATH = os.path.abspath("models/unet/Animate/Wan2_2-Animate-14B_fp8_scaled_e4m3fn_KJ_v2.safetensors")
@@ -35,17 +35,29 @@ SERVER_ARGS: list[str] = [
 ]
 FREE_FLOOR_MB = 100  # 设备剩余显存低于此值就杀进程（文档建议值，给杀进程留余量）
 RAM_FLOOR_MB = 2000   # RAM可用低于此值就杀进程（WDDM 溢出的终点是拖垮系统）
-LOG_INTERVAL = 2.0    # 显存日志间隔（秒）
+LOG_INTERVAL = 2.0    # 护栏线程检查显存/RAM 地板的间隔（不再打周期日志，每层 block 自报）
+DUMP_BLOCK = 1        # 第一个 context window 跑完第几个 block 后做显存分解；None=不做
 # ====================
 
 if SERVER_ARGS:
     sys.argv = [sys.argv[0]] + SERVER_ARGS
 
-# 让 logging.info 可见（文档差异点 6）：server 加载路径的关键日志
-# （Model storage policy / prepared ... Staged / aimdo 原生）全走 logging.info，裸脚本默认丢弃
+# logging.info 可见但降噪（文档差异点 6）：只放行关键加载日志，挡掉 comfy_kitchen 等噪音
 import logging
 
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+class _KeepKeyLines(logging.Filter):
+    KEYS = ("显存", "storage policy", "Staged", "Requested to load",
+            "ontext window", "aimdo:")
+
+    def filter(self, record):
+        return any(k in record.getMessage() for k in self.KEYS)
+
+
+_handler = logging.StreamHandler()
+_handler.addFilter(_KeepKeyLines())
+logging.getLogger().addHandler(_handler)
+logging.getLogger().setLevel(logging.INFO)
 
 # 关键！main.py:2 会开参数解析，裸脚本不开的话 cli_args 走 parse_args([])，所有 SERVER_ARGS 被静默丢弃
 import comfy.options
@@ -90,7 +102,7 @@ stop = threading.Event()
 _last = {"alloc": -1e9, "reserved": -1e9, "free": -1e9}
 
 
-def log(tag: str, force=False, min_delta_mb=64):
+def log(tag: str, force=False, min_delta_mb=128):
     import psutil
     proc = psutil.Process()
     alloc = torch.cuda.memory_allocated() / 2**20
@@ -120,8 +132,51 @@ def guard():
         if ram_avail < RAM_FLOOR_MB:
             print(f"\n!!! RAM可用 {ram_avail:.0f}MB < {RAM_FLOOR_MB}MB，杀进程防蓝屏", flush=True)
             os._exit(1)
-        log("监测")
-        stop.wait(LOG_INTERVAL)  # ponytail: log 内部有 64MB 变化阈值，实际不会 2 秒一行
+        stop.wait(LOG_INTERVAL)
+
+
+def dump_cuda_tensors(tag, top=15):
+    """枚举进程内所有存活 CUDA 张量，按形状分组——显存分解的实测手段（view 共享存储会重复计数）"""
+    import gc
+    groups = {}
+    for obj in gc.get_objects():
+        try:
+            if torch.is_tensor(obj) and obj.is_cuda:
+                key = (tuple(obj.shape), str(obj.dtype).replace("torch.", ""))
+                g = groups.setdefault(key, [0, 0])
+                g[0] += 1
+                g[1] += obj.numel() * obj.element_size()
+        except Exception:
+            pass  # 已析构的张量
+    items = sorted(groups.items(), key=lambda kv: -kv[1][1])[:top]
+    print(f"[{tag}] 存活 CUDA 张量 Top{top} (torch占用={torch.cuda.memory_allocated()/2**20:.0f}MB):", flush=True)
+    for (shape, dtype), (cnt, nbytes) in items:
+        print(f"  {shape} ×{cnt} = {nbytes/2**20:.0f}MB {dtype}", flush=True)
+
+
+_block_state = {"n": 0, "t0": None, "dumped": False}
+REPORT_BLOCKS = 40  # 只报第一个 window 的前 40 个 block，之后静默
+
+
+def _block_probe(args):
+    """挂在 patches['double_block'] 上：每层报一行耗时/显存 + 逐层峰值重置；指定层做张量分解"""
+    s = _block_state
+    s["n"] += 1
+    now = __import__("time").perf_counter()
+    if s["t0"] is not None:
+        peak = torch.cuda.max_memory_allocated() / 2**20
+        free, _total = torch.cuda.mem_get_info()
+        i = args["block_index"]
+        if s["n"] <= REPORT_BLOCKS:
+            print(f"[block {i:2d}] 耗时={now - s['t0']:5.2f}s 峰值={peak:5.0f}MB "
+                  f"torch占用={torch.cuda.memory_allocated()/2**20:5.0f}MB "
+                  f"torch保留={torch.cuda.memory_reserved()/2**20:5.0f}MB 设备剩余={free/2**20:4.0f}MB", flush=True)
+        if not s["dumped"] and i == DUMP_BLOCK:
+            s["dumped"] = True
+            dump_cuda_tensors(f"window1-block{i + 1}后")
+    torch.cuda.reset_peak_memory_stats()
+    s["t0"] = now
+    return {"img": args["img"]}
 
 
 def main():
@@ -154,6 +209,10 @@ def main():
         causal_window_fix=True,
     )
     comfy.context_windows.create_prepare_sampling_wrapper(patcher)
+
+    # block 级探针：走主线留的 double_block patch 口，不改模型代码
+    if DUMP_BLOCK is not None:
+        patcher.model_options.setdefault("transformer_options", {}).setdefault("patches", {})["double_block"] = [_block_probe]
 
     # 随机构造 conds（语义无关，只对显存结构负责）。键名对应 WAN22_Animate.extra_conds 的读取
     with torch.inference_mode():  # server 在 execution.py 全程 inference_mode，必须对齐

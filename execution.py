@@ -35,6 +35,19 @@ def _vram_line():
             f"RAM可用={psutil.virtual_memory().available/2**20:.0f}MB")
 
 
+# [显存日志] 节点级降噪：显存相对上次节点日志变化 <64MB 就不打（Constant 节点、纯 CPU 节点等）
+_vram_last_snapshot = [-1e9, -1e9, -1e9]
+
+
+def _vram_changed():
+    free, _total = torch.cuda.mem_get_info()
+    cur = (torch.cuda.memory_allocated(), torch.cuda.memory_reserved(), free)
+    if all(abs(a - b) < 64 * 2**20 for a, b in zip(cur, _vram_last_snapshot)):
+        return False
+    _vram_last_snapshot[:] = cur
+    return True
+
+
 # [显存日志] 周期监测线程：和 my/attention_vram_test.py 的 [监测] 同口径；
 # 变化不超过 64MB 不打日志，避免恒定刷屏
 def _start_vram_monitor():
@@ -49,13 +62,13 @@ def _start_vram_monitor():
             free, _total = torch.cuda.mem_get_info()
             rss = proc.memory_info().rss
             cur = (torch.cuda.memory_allocated(), torch.cuda.memory_reserved(), free, rss)
-            if any(abs(a - b) > 64 * 2**20 for a, b in zip(cur, last)):
+            if any(abs(a - b) > 128 * 2**20 for a, b in zip(cur, last)):
                 read_mb = proc.io_counters().read_bytes / 2**20
                 mapped = sum(m.rss for m in proc.memory_maps() if "safetensors" in m.path.lower()) / 2**20
                 logging.info(f"[显存][监测] {_vram_line()} "
                              f"进程RSS={rss/2**20:.0f}MB 读盘累计={read_mb:.0f}MB 权重映射驻留={mapped:.0f}MB")
                 last = cur
-            time.sleep(2.0)
+            time.sleep(5.0)
     threading.Thread(target=loop, daemon=True).start()
 
 
@@ -529,7 +542,8 @@ async def execute(server: "ExecutionServer", dynprompt, caches, current_item, ex
         else:
             get_progress_state().start_progress(unique_id)
             # [显存日志] 节点开始
-            logging.info(f"[显存] {class_type}#{display_node_id} 开始: {_vram_line()}")
+            if _vram_changed():
+                logging.info(f"[显存] {class_type}#{display_node_id} 开始: {_vram_line()}")
             input_data_all, missing_keys, v3_data = get_input_data(inputs, class_def, unique_id, execution_list, dynprompt, extra_data)
             if server.client_id is not None:
                 server.last_node_id = display_node_id
@@ -593,7 +607,8 @@ async def execute(server: "ExecutionServer", dynprompt, caches, current_item, ex
                     comfy.model_management.reset_cast_buffers()
                     comfy_aimdo.model_vbar.vbars_reset_watermark_limits()
                 # [显存日志] 节点结束（aimdo 清理后）
-                logging.info(f"[显存] {class_type}#{display_node_id} 结束: {_vram_line()}")
+                if _vram_changed():
+                    logging.info(f"[显存] {class_type}#{display_node_id} 结束: {_vram_line()}")
 
             if has_pending_tasks:
                 pending_async_nodes[unique_id] = output_data
