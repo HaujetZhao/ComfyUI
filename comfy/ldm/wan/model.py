@@ -65,12 +65,13 @@ class WanSelfAttention(nn.Module):
         self.norm_q = operation_settings.get("operations").RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
         self.norm_k = operation_settings.get("operations").RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
 
-    def forward(self, x, freqs, transformer_options={}, modulation=None):
+    def forward(self, x, freqs, transformer_options={}, modulation=None, residual_gate=None):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
             modulation: (norm, shift, scale)，传入时由本层负责调制——分块路径逐块做，省全量调制副本
+            residual_gate: 残差门控，分块路径下 o 输出经门控直接写回 x 并返回 None
         """
         patches = transformer_options.get("patches", {})
 
@@ -86,13 +87,14 @@ class WanSelfAttention(nn.Module):
 
         if s >= BLOCK_CHUNK_MIN_SEQ and modulation is not None and not patches.get("attn1_patch"):
             # 调制/K/V/Q 全部按 token 分块（issue kijai/ComfyUI-WanVideoWrapper#1969 策略 III）：
-            # 常驻只有 k/v/y 三个 buffer，无任何全量副本。
+            # 常驻只有 k/v 两个 buffer；residual_gate 非 None 时 o 输出逐块直接写回 x（省全量 y buffer），
+            # 并返回 None 让调用方跳过残差相加。
             # 必须两轮循环：self-attention 的每个 q 块都要对全量 K/V 做 attention，
             # 所以先填满 k/v buffer，再逐块算 q（合并成单轮的话后半 k_buf 还是垃圾）。
             norm1, m_shift, m_scale = modulation
             k_buf = torch.empty_like(x)
             v_buf = torch.empty_like(x)
-            y = torch.empty_like(x)
+            y = None if residual_gate is not None else torch.empty_like(x)
             for s0 in range(0, s, SELF_ATTN_CHUNK):
                 s1 = min(s0 + SELF_ATTN_CHUNK, s)
                 xm = modulate(x[:, s0:s1], norm1, m_shift, m_scale)
@@ -100,8 +102,8 @@ class WanSelfAttention(nn.Module):
                 v_buf[:, s0:s1] = self.v(xm)
             for s0 in range(0, s, SELF_ATTN_CHUNK):
                 s1 = min(s0 + SELF_ATTN_CHUNK, s)
-                xm = modulate(x[:, s0:s1], norm1, m_shift, m_scale)
-                qc = qkv_fn_q(xm, freqs[:, s0:s1])
+                xs = x[:, s0:s1]
+                qc = qkv_fn_q(modulate(xs, norm1, m_shift, m_scale), freqs[:, s0:s1])
                 attn = optimized_attention(
                     AttentionTensorContainer(qc.reshape(b, s1 - s0, n * d)),
                     AttentionTensorContainer(k_buf),
@@ -110,7 +112,11 @@ class WanSelfAttention(nn.Module):
                     preferred_attention=self.comfy_attention,
                     transformer_options=transformer_options,
                 )
-                y[:, s0:s1] = self.o(attn)
+                o = self.o(attn)
+                if residual_gate is not None:
+                    xs.addcmul_(o, repeat_e(residual_gate, xs))
+                else:
+                    y[:, s0:s1] = o
             return y
 
         if modulation is not None:
@@ -145,24 +151,29 @@ class WanSelfAttention(nn.Module):
 
 class WanT2VCrossAttention(WanSelfAttention):
 
-    def forward(self, x, context, transformer_options={}, **kwargs):
+    def forward(self, x, context, transformer_options={}, residual_x=None, **kwargs):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
             context(Tensor): Shape [B, L2, C]
         """
         if x.shape[1] >= BLOCK_CHUNK_MIN_SEQ:
-            # q/输出按 token 分块（k/v 来自 context 很小，全量驻留），省 q/attention 输出两份全量瞬时
+            # q/输出按 token 分块（k/v 来自 context 很小，全量驻留），省 q/attention 输出两份全量瞬时；
+            # residual_x 非 None 时 o 输出逐块直接加回 residual_x（省全量 y buffer），返回 None
             b, s = x.shape[0], x.shape[1]
             k = self.norm_k(self.k(context))
             v = self.v(context)
-            y = torch.empty_like(x)
+            y = None if residual_x is not None else torch.empty_like(x)
             for s0 in range(0, s, SELF_ATTN_CHUNK):
                 s1 = min(s0 + SELF_ATTN_CHUNK, s)
                 q = AttentionTensorContainer(self.norm_q(self.q(x[:, s0:s1])))
                 # container 是一次性的（take 后标记 consumed），循环内重建薄壳，零拷贝
                 attn = optimized_attention(q, AttentionTensorContainer(k), AttentionTensorContainer(v), heads=self.num_heads, preferred_attention=self.comfy_attention, transformer_options=transformer_options)
-                y[:, s0:s1] = self.o(attn)
+                o = self.o(attn)
+                if residual_x is not None:
+                    residual_x[:, s0:s1].add_(o)
+                else:
+                    y[:, s0:s1] = o
             return y
 
         # compute query, key, value
@@ -192,7 +203,7 @@ class WanI2VCrossAttention(WanSelfAttention):
         # self.alpha = nn.Parameter(torch.zeros((1, )))
         self.norm_k_img = operation_settings.get("operations").RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
 
-    def forward(self, x, context, context_img_len, transformer_options={}):
+    def forward(self, x, context, context_img_len, transformer_options={}, residual_x=None):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -203,13 +214,14 @@ class WanI2VCrossAttention(WanSelfAttention):
 
         if x.shape[1] >= BLOCK_CHUNK_MIN_SEQ:
             # q/输出按 token 分块（k/k_img/v/v_img 来自 context 很小，全量驻留），
-            # 省 q/img_x/两次 attention 输出/相加/共五份全量瞬时
+            # 省 q/img_x/两次 attention 输出/相加/共五份全量瞬时；
+            # residual_x 非 None 时 o 输出逐块直接加回 residual_x（省全量 y buffer），返回 None
             b, s = x.shape[0], x.shape[1]
             k_img = self.norm_k_img(self.k_img(context_img))
             v_img = self.v_img(context_img)
             k = self.norm_k(self.k(context))
             v = self.v(context)
-            y = torch.empty_like(x)
+            y = None if residual_x is not None else torch.empty_like(x)
             for s0 in range(0, s, SELF_ATTN_CHUNK):
                 s1 = min(s0 + SELF_ATTN_CHUNK, s)
                 qc = self.norm_q(self.q(x[:, s0:s1]))
@@ -217,7 +229,11 @@ class WanI2VCrossAttention(WanSelfAttention):
                 # Sageattn can cause Nans here, don't allow it as there is no speed difference anyway as img attention is tiny.
                 img_x = optimized_attention(AttentionTensorContainer(qc), AttentionTensorContainer(k_img), AttentionTensorContainer(v_img), heads=self.num_heads, preferred_attention=self.comfy_attention, transformer_options=transformer_options, low_precision_attention=False)
                 attn = optimized_attention(AttentionTensorContainer(qc), AttentionTensorContainer(k), AttentionTensorContainer(v), heads=self.num_heads, preferred_attention=self.comfy_attention, transformer_options=transformer_options)
-                y[:, s0:s1] = self.o(img_x + attn)
+                o = self.o(img_x + attn)
+                if residual_x is not None:
+                    residual_x[:, s0:s1].add_(o)
+                else:
+                    y[:, s0:s1] = o
             return y
 
         # compute query, key, value
@@ -341,17 +357,21 @@ class WanAttentionBlock(nn.Module):
         x = x.contiguous() # otherwise implicit in LayerNorm
         y = self.self_attn(
             x, freqs, transformer_options=transformer_options,
-            modulation=(self.norm1, e[0], e[1]))
+            modulation=(self.norm1, e[0], e[1]), residual_gate=e[2])
         probe = transformer_options.get("vram_stage_probe")
         if probe is not None:
             probe("self_attn")
 
-        # 残差原地写回（issue #1969 策略 III）：省一份 [B,S,C] 的相和瞬时
-        x.addcmul_(y, repeat_e(e[2], x))
-        del y
+        # 残差写回（issue #1969 策略 III）：分块路径已在 attention 内逐块写回（y=None），
+        # 全量路径在这里原地补，两处都省一份 [B,S,C] 相和瞬时
+        if y is not None:
+            x.addcmul_(y, repeat_e(e[2], x))
 
         # cross-attention & ffn
-        x.add_(self.cross_attn(self.norm3(x), context, context_img_len=context_img_len, transformer_options=transformer_options))
+        y = self.cross_attn(self.norm3(x), context, context_img_len=context_img_len,
+                            transformer_options=transformer_options, residual_x=x)
+        if y is not None:
+            x.add_(y)
 
         if "attn2_patch" in patches:
             for p in patches["attn2_patch"]:
