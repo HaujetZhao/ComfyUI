@@ -15,10 +15,11 @@ import comfy.ops
 import comfy.patcher_extension
 import comfy.quant_ops
 
-# WanSelfAttention Q 分块（issue kijai/ComfyUI-WanVideoWrapper#1969 策略 III）：
+# Wan block 分块优化（issue kijai/ComfyUI-WanVideoWrapper#1969）：
 # 序列达到阈值才启用。512×512×81 窗口=21504、1024×512×81=43008 均启用
-SELF_ATTN_CHUNK = 4096
-SELF_ATTN_CHUNK_MIN_SEQ = 8192
+SELF_ATTN_CHUNK = 4096      # self-attention 的 Q 分块大小（策略 III）
+FFN_CHUNK = 4096            # FFN 的 token 分块大小
+BLOCK_CHUNK_MIN_SEQ = 8192  # 序列超过此值才启用以上分块
 
 
 def sinusoidal_embedding_1d(dim, position):
@@ -82,7 +83,7 @@ class WanSelfAttention(nn.Module):
             k = self.norm_k(self.k(x)).view(b, s, n, d)
             return apply_rope1(k, freqs)
 
-        if s >= SELF_ATTN_CHUNK_MIN_SEQ and not patches.get("attn1_patch"):
+        if s >= BLOCK_CHUNK_MIN_SEQ and not patches.get("attn1_patch"):
             # Q 分块（issue kijai/ComfyUI-WanVideoWrapper#1969 策略 III）：
             # K/V 全量驻留，Q 逐块投影+rope+attention+o，结果逐块写入预分配 buffer。
             # 省掉 q 全量、attention 输出、o 输出三份 [B,S,C] 瞬时激活（43008 token 时约省 1.2GB/层）
@@ -283,6 +284,7 @@ class WanAttentionBlock(nn.Module):
         # assert e.dtype == torch.float32
 
         patches = transformer_options.get("patches", {})
+        s = x.shape[1]
 
         if e.ndim < 4:
             e = (comfy.model_management.cast_to(self.modulation, dtype=x.dtype, device=x.device) + e).chunk(6, dim=1)
@@ -312,8 +314,15 @@ class WanAttentionBlock(nn.Module):
         if probe is not None:
             probe("cross_attn")
 
-        y = self.ffn(modulate(x, self.norm2, e[3], e[4]))
-        x = torch.addcmul(x, y, repeat_e(e[5], x))
+        if s >= BLOCK_CHUNK_MIN_SEQ:
+            # FFN 按 token 分块 + 原地 addcmul 写回（省调制副本/隐层/输出三份 [B,S,·] 瞬时）
+            for s0 in range(0, s, FFN_CHUNK):
+                s1 = min(s0 + FFN_CHUNK, s)
+                xs = x[:, s0:s1]
+                xs.addcmul_(self.ffn(modulate(xs, self.norm2, e[3], e[4])), repeat_e(e[5], xs))
+        else:
+            y = self.ffn(modulate(x, self.norm2, e[3], e[4]))
+            x = torch.addcmul(x, y, repeat_e(e[5], x))
         if probe is not None:
             probe("ffn")
         return x
