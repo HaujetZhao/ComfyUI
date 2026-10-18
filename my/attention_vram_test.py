@@ -7,13 +7,16 @@
 import os
 import sys
 import threading
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 # my/ 下有 comfy/ 副本会遮住仓库的 comfy 包，强制用仓库根目录的
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ===== 可改参数 =====
-WIDTH = 512         # 像素宽，8 的倍数
-HEIGHT = 512        # 像素高
+WIDTH = 1280         # 像素宽，8 的倍数
+HEIGHT = 720        # 像素高
 FRAMES = 151        # 目标像素帧数，latent 帧数 = (FRAMES-1)//4+1
 MODEL_PATH = os.path.abspath("models/unet/Animate/Wan2_2-Animate-14B_fp8_scaled_e4m3fn_KJ_v2.safetensors")
 # 工作流同款 LoRA。注意：脚本加载时空闲显存比 server 大（server 先 stage 了 TE/CLIP/Vision），
