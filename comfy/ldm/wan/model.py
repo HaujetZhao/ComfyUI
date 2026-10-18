@@ -65,11 +65,12 @@ class WanSelfAttention(nn.Module):
         self.norm_q = operation_settings.get("operations").RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
         self.norm_k = operation_settings.get("operations").RMSNorm(dim, eps=eps, elementwise_affine=True, device=operation_settings.get("device"), dtype=operation_settings.get("dtype")) if qk_norm else nn.Identity()
 
-    def forward(self, x, freqs, transformer_options={}):
+    def forward(self, x, freqs, transformer_options={}, modulation=None):
         r"""
         Args:
             x(Tensor): Shape [B, L, num_heads, C / num_heads]
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
+            modulation: (norm, shift, scale)，传入时由本层负责调制——分块路径逐块做，省全量调制副本
         """
         patches = transformer_options.get("patches", {})
 
@@ -79,24 +80,32 @@ class WanSelfAttention(nn.Module):
             q = self.norm_q(self.q(xs)).view(b, -1, n, d)
             return apply_rope1(q, fs)
 
-        def qkv_fn_k(x):
-            k = self.norm_k(self.k(x)).view(b, s, n, d)
-            return apply_rope1(k, freqs)
+        def qkv_fn_k(xs, fs):
+            k = self.norm_k(self.k(xs)).view(b, -1, n, d)
+            return apply_rope1(k, fs)
 
-        if s >= BLOCK_CHUNK_MIN_SEQ and not patches.get("attn1_patch"):
-            # Q 分块（issue kijai/ComfyUI-WanVideoWrapper#1969 策略 III）：
-            # K/V 全量驻留，Q 逐块投影+rope+attention+o，结果逐块写入预分配 buffer。
-            # 省掉 q 全量、attention 输出、o 输出三份 [B,S,C] 瞬时激活（43008 token 时约省 1.2GB/层）
-            k = qkv_fn_k(x).view(b, s, n * d)
-            v = self.v(x).view(b, s, n * d)
+        if s >= BLOCK_CHUNK_MIN_SEQ and modulation is not None and not patches.get("attn1_patch"):
+            # 调制/K/V/Q 全部按 token 分块（issue kijai/ComfyUI-WanVideoWrapper#1969 策略 III）：
+            # 常驻只有 k/v/y 三个 buffer，无任何全量副本。
+            # 必须两轮循环：self-attention 的每个 q 块都要对全量 K/V 做 attention，
+            # 所以先填满 k/v buffer，再逐块算 q（合并成单轮的话后半 k_buf 还是垃圾）。
+            norm1, m_shift, m_scale = modulation
+            k_buf = torch.empty_like(x)
+            v_buf = torch.empty_like(x)
             y = torch.empty_like(x)
             for s0 in range(0, s, SELF_ATTN_CHUNK):
                 s1 = min(s0 + SELF_ATTN_CHUNK, s)
-                qc = qkv_fn_q(x[:, s0:s1], freqs[:, s0:s1])
+                xm = modulate(x[:, s0:s1], norm1, m_shift, m_scale)
+                k_buf[:, s0:s1] = qkv_fn_k(xm, freqs[:, s0:s1]).view(b, s1 - s0, n * d)
+                v_buf[:, s0:s1] = self.v(xm)
+            for s0 in range(0, s, SELF_ATTN_CHUNK):
+                s1 = min(s0 + SELF_ATTN_CHUNK, s)
+                xm = modulate(x[:, s0:s1], norm1, m_shift, m_scale)
+                qc = qkv_fn_q(xm, freqs[:, s0:s1])
                 attn = optimized_attention(
                     AttentionTensorContainer(qc.reshape(b, s1 - s0, n * d)),
-                    AttentionTensorContainer(k),
-                    AttentionTensorContainer(v),
+                    AttentionTensorContainer(k_buf),
+                    AttentionTensorContainer(v_buf),
                     heads=self.num_heads,
                     preferred_attention=self.comfy_attention,
                     transformer_options=transformer_options,
@@ -104,11 +113,14 @@ class WanSelfAttention(nn.Module):
                 y[:, s0:s1] = self.o(attn)
             return y
 
+        if modulation is not None:
+            x = modulate(x, *modulation)
+
         #These two are VRAM hogs, so we want to do all of q computation and
         #have pytorch garbage collect the intermediates on the sub function
         #return before we touch k
         q = qkv_fn_q(x, freqs)
-        k = qkv_fn_k(x)
+        k = qkv_fn_k(x, freqs)
 
         if patches.get("attn1_patch"):
             q_patch, k_patch = q, k
@@ -328,8 +340,8 @@ class WanAttentionBlock(nn.Module):
         # self-attention
         x = x.contiguous() # otherwise implicit in LayerNorm
         y = self.self_attn(
-            modulate(x, self.norm1, e[0], e[1]),
-            freqs, transformer_options=transformer_options)
+            x, freqs, transformer_options=transformer_options,
+            modulation=(self.norm1, e[0], e[1]))
         probe = transformer_options.get("vram_stage_probe")
         if probe is not None:
             probe("self_attn")
@@ -1625,8 +1637,8 @@ class WanAttentionBlockAudio(WanAttentionBlock):
 
         # self-attention
         y = self.self_attn(
-            modulate(x, self.norm1, e[0], e[1]),
-            freqs, transformer_options=transformer_options)
+            x, freqs, transformer_options=transformer_options,
+            modulation=(self.norm1, e[0], e[1]))
 
         x = torch.addcmul(x, y, repeat_e(e[2], x))
 

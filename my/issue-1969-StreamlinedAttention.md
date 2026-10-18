@@ -80,3 +80,73 @@ I thought `ComfyUI-WanAnimatePreprocess`'s `VideoVAE_` already handled VAE chunk
 These two implementation would allow 8G VRAM to run 720P and 1080P video, no longer limited by VRAM space, making cuda computation most busy and efficient. 
 
 @kijai  
+
+---
+
+# 机理中文版（技术报告翻译）
+
+## 挑战：8GB 的物理天花板
+
+Wan 2.1 生成 720p 150 帧视频时序列长达 **54.7 万 token**。标准实现下，中间张量
+（X ≈ 1.6GB，KV 缓存 ≈ 3.2GB）加上权重立即超过 8GB 显存上限，触发 Windows 共享内存
+交换，性能掉 90%，生成基本不可用。
+
+## 策略 I：把"latent 基座"卸载到 CPU
+
+- **思路**：主 latent 张量 X 作为残差基座，访问频繁但任一时刻只有小切片参与计算。
+- **做法**：序列长度超过阈值（如 65536 token）时，强制 X 驻留**系统内存（CPU）**而非显存。
+- **收益**：永久省回 1.6GB 显存；前向时只有 4096 token 的"计算块"临时上传 GPU。
+
+## 策略 II：逐帧/顺序 Patch Embedding
+
+- **思路**：标准 3D 卷积的 patch embedding 产生巨大的 FP32 中间缓冲（720p 峰值约 3.2GB）。
+- **做法**：把 embedding 改成**逐帧迭代**处理，而不是一整个大 3D 卷积。
+- **收益**：embedding 峰值从 3.2GB 砍到 <100MB，"点火阶段"不再爆。
+
+## 策略 III：两遍流式 attention（原地写回）
+
+消除 `torch.cat` 的显存翻倍效应，专门的两遍流程：
+
+- **Phase A（KV buffer 填充）**：在 GPU 上预分配完整 K/V buffer，**分块投影 K/V、
+  直接写入预分配切片**。
+- **Phase B（分块 Q attention）**：逐块取 Q（对 CPU 驻留的 X 而言是从 CPU 拉），
+  对完整 KV buffer 跑 attention。
+- **直接写回**：attention 投影的输出**原地直接加回** latent X。
+- **收益**：唯一的大占用就是 KV buffer（3.2GB），不再产生巨大的中间"Part"张量去做拼接。
+
+## 策略 IV：硬性显存修剪（清缓存）
+
+- **做法**：借助 ComfyUI 的动态加载，在关键瓶颈节点显式注入 `gc.collect()` 和
+  `torch.cuda.empty_cache()`（具体位置：CPU offload 之后、大块 KV 分配之前）。
+- **收益**：防止 PyTorch 缓存分配器碎片化或攥着上一层的"陈旧"隐藏状态不放，
+  给 3.2GB 的 KV buffer 腾出连续大块。
+
+## 策略 V：动态空间对齐（鲁棒性）
+
+- **问题**：视频序列空间 padding 不一致（如 1280x720 经不同 VAE/Pose padding 得到
+  136px vs 135px 的 latent）。
+- **做法**：分块加法逻辑里引入 **min-slicing**，自动取主 latent 与 pose latent 的
+  空间维度最小交集对齐。
+- **收益**：非标准长宽比下分块运算不再报 `Size Mismatch`。
+
+## 效果总结
+
+从"连续分配"转为"流式分块"，720p 150f 峰值显存从 8.9GB 压到 7.3GB，全程待在
+显存专用上限内不触碰 Windows 交换的悬崖，瓶颈回到 CUDA 算力本身。
+
+---
+
+# 实现对照（wan-attention-stream 分支，2026-10-18）
+
+| 文档策略 | 状态 | 说明 |
+|---|---|---|
+| III Phase B：Q 分块 attention，KV 全量驻留 | ✅ 已实现 | `5432e4e`，self_attn；`63805e9` 举一反三到 cross_attn（文档未明说 cross_attn，但同一思路） |
+| III Phase A：K/V 分块投影写预分配 buffer | 🔨 进行中 | 第 4 刀（调制下放 + K/V 分块投影），数值校验未通过，调试中 |
+| III 直接写回：attention 输出原地加回 | ⬜ 未做 | block 里仍是 `x = x + cross_attn(...)`，可改 `x.add_(y)` 省 210MB |
+| FFN 按 token 分块 + 原地 addcmul | ✅ 已实现（文档外延） | `6b8b314`，文档没提 FFN，是同思路延伸 |
+| I：主 latent X CPU 驻留（>65536 token） | ⬜ 未做 | 512×512（21504 token）不触发；高分辨率再说 |
+| II：逐帧 patch embedding | ⬜ 未做 | 同上，点火阶段一次性开销，高分辨率才显著 |
+| IV：注入 gc.collect/empty_cache | ⬜ 不做 | dirty hack，与 aimdo 动态加载叠加后行为难推理；先看不做能压到多少 |
+| V：min-slicing 空间对齐 | ⬜ 不适用 | 补丁处理 pose latent 对齐的鲁棒性问题，我们未遇到 |
+
+
