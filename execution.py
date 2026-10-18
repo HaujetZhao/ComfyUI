@@ -48,31 +48,6 @@ def _vram_changed():
     return True
 
 
-# [显存日志] 周期监测线程：和 my/attention_vram_test.py 的 [监测] 同口径；
-# 变化不超过 64MB 不打日志，避免恒定刷屏
-def _start_vram_monitor():
-    if not torch.cuda.is_available():
-        return
-    import psutil
-
-    def loop():
-        last = (-1e9, -1e9, -1e9, -1e9)
-        proc = psutil.Process()
-        while True:
-            free, _total = torch.cuda.mem_get_info()
-            rss = proc.memory_info().rss
-            cur = (torch.cuda.memory_allocated(), torch.cuda.memory_reserved(), free, rss)
-            if any(abs(a - b) > 128 * 2**20 for a, b in zip(cur, last)):
-                read_mb = proc.io_counters().read_bytes / 2**20
-                mapped = sum(m.rss for m in proc.memory_maps() if "safetensors" in m.path.lower()) / 2**20
-                logging.info(f"[显存][监测] {_vram_line()} "
-                             f"进程RSS={rss/2**20:.0f}MB 读盘累计={read_mb:.0f}MB 权重映射驻留={mapped:.0f}MB")
-                last = cur
-            time.sleep(5.0)
-    threading.Thread(target=loop, daemon=True).start()
-
-
-_start_vram_monitor()
 from comfy_execution.caching import (
     BasicCache,
     CacheKeySetID,
