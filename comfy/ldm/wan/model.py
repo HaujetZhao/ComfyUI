@@ -139,6 +139,20 @@ class WanT2VCrossAttention(WanSelfAttention):
             x(Tensor): Shape [B, L1, C]
             context(Tensor): Shape [B, L2, C]
         """
+        if x.shape[1] >= BLOCK_CHUNK_MIN_SEQ:
+            # q/输出按 token 分块（k/v 来自 context 很小，全量驻留），省 q/attention 输出两份全量瞬时
+            b, s = x.shape[0], x.shape[1]
+            k = self.norm_k(self.k(context))
+            v = self.v(context)
+            y = torch.empty_like(x)
+            for s0 in range(0, s, SELF_ATTN_CHUNK):
+                s1 = min(s0 + SELF_ATTN_CHUNK, s)
+                q = AttentionTensorContainer(self.norm_q(self.q(x[:, s0:s1])))
+                # container 是一次性的（take 后标记 consumed），循环内重建薄壳，零拷贝
+                attn = optimized_attention(q, AttentionTensorContainer(k), AttentionTensorContainer(v), heads=self.num_heads, preferred_attention=self.comfy_attention, transformer_options=transformer_options)
+                y[:, s0:s1] = self.o(attn)
+            return y
+
         # compute query, key, value
         q = AttentionTensorContainer(self.norm_q(self.q(x)))
         k = AttentionTensorContainer(self.norm_k(self.k(context)))
@@ -174,6 +188,25 @@ class WanI2VCrossAttention(WanSelfAttention):
         """
         context_img = context[:, :context_img_len]
         context = context[:, context_img_len:]
+
+        if x.shape[1] >= BLOCK_CHUNK_MIN_SEQ:
+            # q/输出按 token 分块（k/k_img/v/v_img 来自 context 很小，全量驻留），
+            # 省 q/img_x/两次 attention 输出/相加/共五份全量瞬时
+            b, s = x.shape[0], x.shape[1]
+            k_img = self.norm_k_img(self.k_img(context_img))
+            v_img = self.v_img(context_img)
+            k = self.norm_k(self.k(context))
+            v = self.v(context)
+            y = torch.empty_like(x)
+            for s0 in range(0, s, SELF_ATTN_CHUNK):
+                s1 = min(s0 + SELF_ATTN_CHUNK, s)
+                qc = self.norm_q(self.q(x[:, s0:s1]))
+                # container 是一次性的（take 后标记 consumed），q 喂两次、k/v 循环多轮，全部每次重建薄壳，零拷贝
+                # Sageattn can cause Nans here, don't allow it as there is no speed difference anyway as img attention is tiny.
+                img_x = optimized_attention(AttentionTensorContainer(qc), AttentionTensorContainer(k_img), AttentionTensorContainer(v_img), heads=self.num_heads, preferred_attention=self.comfy_attention, transformer_options=transformer_options, low_precision_attention=False)
+                attn = optimized_attention(AttentionTensorContainer(qc), AttentionTensorContainer(k), AttentionTensorContainer(v), heads=self.num_heads, preferred_attention=self.comfy_attention, transformer_options=transformer_options)
+                y[:, s0:s1] = self.o(img_x + attn)
+            return y
 
         # compute query, key, value
         q = self.norm_q(self.q(x))
