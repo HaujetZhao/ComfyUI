@@ -15,7 +15,7 @@ Python 把脚本所在目录加进 `sys.path`，`my/comfy/`（streaming patch �
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ```
 
-### 2. 启动参数必须在 `import comfy` 之前注入
+### 2. 启动参数必须在 `import comfy` 之前注入，且必须开参数解析
 
 model_management 按 `sys.argv` 初始化（`--disable-pinned-memory` 等）。把 server 的
 启动参数照抄进脚本、在 import comfy 前设好：
@@ -23,9 +23,19 @@ model_management 按 `sys.argv` 初始化（`--disable-pinned-memory` 等）。�
 ```python
 SERVER_ARGS = ["--disable-pinned-memory"]
 sys.argv = [sys.argv[0]] + SERVER_ARGS
+
+import comfy.options
+comfy.options.enable_args_parsing()   # 关键！见下
 ```
 
 server 的实际启动参数看控制台最开头 `[显存日志] 启动参数` 那行（cli_args.py 加的）。
+
+**只注入 `sys.argv` 不够**：`comfy.options.args_parsing` 默认 False，此时 cli_args 走
+`parser.parse_args([])`，**所有启动参数被静默丢弃、全用默认值**（2026-10-18 踩过：
+`--disable-pinned-memory` 注入了但 `Enabled pinned memory 12901.0`，RAM 线性涨排查
+半天，最后发现参数根本没被解析）。main.py:2 会调 `enable_args_parsing()`，裸脚本
+必须自己调。验证方法：`[显存日志] 内存相关配置` 那行里 `disable_pinned_memory` 应为
+True。
 
 ### 3. aimdo 原生库初始化（顺序敏感！）
 
@@ -40,7 +50,23 @@ if cli_args.enables_dynamic_vram():        # 默认 True
     comfy_aimdo.control.init(
         simple_vram_headroom=None,         # server: args.reserve_vram 为 None 时同
         nvml_pressure=True)                # server: not args.disable_nvml_pressure
+    import comfy.model_management as mm
+    try:                                   # 复刻 main.py:287-291
+        aimdo_initialized = comfy_aimdo.control.init_devices(
+            (d.index, int(cli_args.args.vram_headroom * 1024**3)) for d in mm.get_all_torch_devices())
+    except TypeError:                      # comfy-aimdo 0.4.9 协议
+        aimdo_initialized = comfy_aimdo.control.init_devices(d.index for d in mm.get_all_torch_devices())
+    if aimdo_initialized:                  # 复刻 main.py:310-312，缺了权重不走动态流送
+        import comfy.model_patcher
+        comfy.model_patcher.CoreModelPatcher = comfy.model_patcher.ModelPatcherDynamic
+        comfy.memory_management.aimdo_enabled = True
 ```
+
+**只做 `control.init()` 不够**：main.py 还要 `init_devices` + 替换
+`CoreModelPatcher` 为 `ModelPatcherDynamic` + 置 `aimdo_enabled = True`，缺任何一步
+`load_models_gpu` 都走 legacy 路径。权重小于空闲显存时看不出来（两条路径都全量进显存），
+测 14B UNet（16GB fp8）时 legacy 路径会直接把权重硬塞显存 + WDDM 静默溢出到系统内存
+（2026-10-18 踩过：任务管理器显存涨过 10GB）。
 
 **关键坑**：`comfy_aimdo/storage.py` 在 **import 时**就把 `control.lib` 拷贝进自己的
 模块变量。`comfy.utils` / `comfy.sd` 会连带 import `comfy.storage → comfy_aimdo.storage`，
@@ -52,10 +78,9 @@ if cli_args.enables_dynamic_vram():        # 默认 True
 `fast_storage()` 的 NVMe 探测对相对路径返回 None → `fast_disk=False`。
 用 `os.path.abspath(...)`。验证方法：脚本打印 `patcher.fast_disk`，应为 True。
 
-已知残留差异：脚本里 `patcher.is_dynamic()` 仍为 False（server 会走动态加载 staged
-路径，`memory_management.aimdo_enabled` 只在 server 里置 True）。对显存测量的影响：
-模型权重远小于空闲显存时两条路径都全量进显存，峰值一致；测大模型（UNet）时要注意
-这条不完全等价。
+已知残留差异（2026-10-18 已修复，见第 3 节）：补齐 `init_devices` +
+`ModelPatcherDynamic` + `aimdo_enabled` 后，`load_diffusion_model` 返回的就是动态
+patcher（`is_dynamic() == True`），与 server 一致。
 
 ### 5. 设备用 `mm.vae_device()`
 
