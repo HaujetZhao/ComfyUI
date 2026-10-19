@@ -455,10 +455,15 @@ class AnimateWanModel(WanModel):
             device=device, dtype=dtype, operations=operations
         )
 
+        # number of extra reference latent frames at the head of the context (set via extra_conds)
+        self.extra_ref_latents = 0
+
     def after_patch_embedding(self, x, pose_latents, face_pixel_values):
+        # latent frames at the head of x that carry no pose/face (main reference + extra references)
+        head_offset = 1 + self.extra_ref_latents
         if pose_latents is not None:
             pose_latents = self.pose_patch_embedding(pose_latents)
-            x[:, :, 1:pose_latents.shape[2] + 1] += pose_latents[:, :, :x.shape[2] - 1]
+            x[:, :, head_offset:pose_latents.shape[2] + head_offset] += pose_latents[:, :, :x.shape[2] - head_offset]
 
         if face_pixel_values is None:
             return x, None
@@ -476,7 +481,7 @@ class AnimateWanModel(WanModel):
         motion_vec = self.face_encoder(motion_vec)
 
         B, L, H, C = motion_vec.shape
-        pad_face = torch.zeros(B, 1, H, C).type_as(motion_vec)
+        pad_face = torch.zeros(B, head_offset, H, C).type_as(motion_vec)
         motion_vec = torch.cat([pad_face, motion_vec], dim=1)
 
         if motion_vec.shape[1] < x.shape[2]:
