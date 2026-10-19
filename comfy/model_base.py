@@ -1824,10 +1824,9 @@ class WAN22_Animate(WAN21):
     def extra_conds(self, **kwargs):
         out = super().extra_conds(**kwargs)
 
-        # number of extra reference latent frames at the head of concat_latent_image;
-        # published for the diffusion model and context window slicing (pose/face head offset)
-        extra_ref_latents = kwargs.get("extra_ref_latents", 0)
-        self.diffusion_model.extra_ref_latents = extra_ref_latents
+        extra_reference_latents = kwargs.get("extra_reference_latents", None)
+        if extra_reference_latents is not None:
+            out['extra_reference_latents'] = comfy.conds.CONDRegular(self.process_latent_in(extra_reference_latents))
 
         face_video_pixels = kwargs.get("face_video_pixels", None)
         if face_video_pixels is not None:
@@ -1839,11 +1838,10 @@ class WAN22_Animate(WAN21):
         return out
 
     def resize_cond_for_context_window(self, cond_key, cond_value, window, x_in, device, retain_index_list=[]):
-        head_offset = 1 + self.diffusion_model.extra_ref_latents
         if cond_key == "face_pixel_values":
-            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_scale=4, temporal_offset=head_offset)
+            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_scale=4, temporal_offset=1)
         if cond_key == "pose_latents":
-            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_offset=head_offset)
+            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_offset=1)
         return super().resize_cond_for_context_window(cond_key, cond_value, window, x_in, device, retain_index_list=retain_index_list)
 
 class WAN_Animate2(WAN21):

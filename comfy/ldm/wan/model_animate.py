@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import math
 from .model import WanModel, sinusoidal_embedding_1d
 from comfy.ldm.modules.attention import AttentionTensorContainer, ComfyAttention, optimized_attention
+import comfy.ldm.common_dit
 import comfy.model_management
 
 class CausalConv1d(nn.Module):
@@ -455,15 +456,30 @@ class AnimateWanModel(WanModel):
             device=device, dtype=dtype, operations=operations
         )
 
-        # number of extra reference latent frames at the head of the context (set via extra_conds)
-        self.extra_ref_latents = 0
+    def _forward(self, x, timestep, context, clip_fea=None, time_dim_concat=None, transformer_options={}, **kwargs):
+        bs, c, t, h, w = x.shape
+        x = comfy.ldm.common_dit.pad_to_patch_size(x, self.patch_size)
+
+        t_len = t
+        if time_dim_concat is not None:
+            time_dim_concat = comfy.ldm.common_dit.pad_to_patch_size(time_dim_concat, self.patch_size)
+            x = torch.cat([x, time_dim_concat], dim=2)
+            t_len = x.shape[2]
+
+        # extra reference latents become prepended tokens in forward_orig; reserve rope positions
+        extra_ref = kwargs.get("extra_reference_latents", None)
+        if extra_ref is not None:
+            extra_ref = comfy.ldm.common_dit.pad_to_patch_size(extra_ref, self.patch_size)
+            kwargs = {**kwargs, "extra_reference_latents": extra_ref}
+            t_len += extra_ref.shape[2]
+
+        freqs = self.rope_encode(t_len, h, w, device=x.device, dtype=x.dtype, transformer_options=transformer_options)
+        return self.forward_orig(x, timestep, context, clip_fea=clip_fea, freqs=freqs, transformer_options=transformer_options, **kwargs)[:, :, :t, :h, :w]
 
     def after_patch_embedding(self, x, pose_latents, face_pixel_values):
-        # latent frames at the head of x that carry no pose/face (main reference + extra references)
-        head_offset = 1 + self.extra_ref_latents
         if pose_latents is not None:
             pose_latents = self.pose_patch_embedding(pose_latents)
-            x[:, :, head_offset:pose_latents.shape[2] + head_offset] += pose_latents[:, :, :x.shape[2] - head_offset]
+            x[:, :, 1:pose_latents.shape[2] + 1] += pose_latents[:, :, :x.shape[2] - 1]
 
         if face_pixel_values is None:
             return x, None
@@ -481,7 +497,7 @@ class AnimateWanModel(WanModel):
         motion_vec = self.face_encoder(motion_vec)
 
         B, L, H, C = motion_vec.shape
-        pad_face = torch.zeros(B, head_offset, H, C).type_as(motion_vec)
+        pad_face = torch.zeros(B, 1, H, C).type_as(motion_vec)
         motion_vec = torch.cat([pad_face, motion_vec], dim=1)
 
         if motion_vec.shape[1] < x.shape[2]:
@@ -519,6 +535,19 @@ class AnimateWanModel(WanModel):
 
         full_ref = None
         img_offset = 0
+        extra_ref = kwargs.get("extra_reference_latents", None)
+        if extra_ref is not None:
+            # extra reference frames as prepended context tokens; channel layout [latent16, mask4, image16].
+            # mask channel 1 and image channels mirroring the latent replicate what the main reference
+            # frame carries in its concat channels, so the tokens read as reference, not as video content
+            f = extra_ref.shape[2]
+            ref_in = torch.zeros_like(x_input[:, :, :f])
+            ref_in[:, :16] = extra_ref
+            ref_in[:, 16:20] = 1.0
+            ref_in[:, 20:36] = extra_ref
+            full_ref = self.patch_embedding(ref_in.float()).to(x.dtype).flatten(2).transpose(1, 2)
+            x = torch.concat((full_ref, x), dim=1)
+            img_offset = full_ref.shape[1]
         if self.ref_conv is not None:
             full_ref = kwargs.get("reference_latent", None)
             if full_ref is not None:
@@ -570,7 +599,9 @@ class AnimateWanModel(WanModel):
             block_t0 = t
 
             if i % 5 == 0 and motion_vec is not None:
-                x = x + self.face_adapter.fuser_blocks[i // 5](x, motion_vec)
+                # face motion applies to video tokens only; leave prepended reference tokens untouched
+                x_img = x[:, img_offset:]
+                x[:, img_offset:] = x_img + self.face_adapter.fuser_blocks[i // 5](x_img, motion_vec)
 
         # head
         x = self.head(x, e)

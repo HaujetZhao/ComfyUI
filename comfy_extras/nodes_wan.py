@@ -1130,7 +1130,7 @@ class WanAnimateToVideo(io.ComfyNode):
                 io.Int.Input("batch_size", default=1, min=1, max=4096),
                 io.ClipVisionOutput.Input("clip_vision_output", optional=True),
                 io.Image.Input("reference_image", optional=True),
-                io.Image.Input("extra_reference_images", optional=True, tooltip="Additional reference images (as a batch) prepended to the reference latent context. The main reference_image stays adjacent to the generated video."),
+                io.Image.Input("extra_reference_images", optional=True, tooltip="Additional reference images (as a batch) injected as reference context for the generation. Visible in every context window when sampling long videos in chunks."),
                 io.Image.Input("face_video", optional=True),
                 io.Image.Input("pose_video", optional=True),
                 io.Int.Input("continue_motion_max_frames", default=5, min=1, max=nodes.MAX_RESOLUTION, step=4),
@@ -1163,19 +1163,16 @@ class WanAnimateToVideo(io.ComfyNode):
 
         image = comfy.utils.common_upscale(reference_image[:length].movedim(-1, 1), width, height, "area", "center").movedim(1, -1)
         concat_latent_image = vae.encode(image[:, :, :, :3])
-
-        # extra reference images each encode to one latent frame, prepended to the reference
-        # section of the context (kept before the main reference so it stays next to the video)
-        extra_ref_latents = 0
-        if extra_reference_images is not None:
-            extras = comfy.utils.common_upscale(extra_reference_images.movedim(-1, 1), width, height, "area", "center").movedim(1, -1)[:, :, :, :3]
-            extra_latent = torch.cat([vae.encode(extras[i:i + 1]) for i in range(extras.shape[0])], dim=2)
-            concat_latent_image = torch.cat((extra_latent, concat_latent_image), dim=2)
-            extra_ref_latents = extra_latent.shape[2]
-
         mask = torch.zeros((1, 4, concat_latent_image.shape[-3], concat_latent_image.shape[-2], concat_latent_image.shape[-1]), device=concat_latent_image.device, dtype=concat_latent_image.dtype)
         trim_latent += concat_latent_image.shape[2]
         ref_motion_latent_length = 0
+
+        # extra reference images each encode to one latent frame; passed as conditioning and
+        # prepended as context tokens by the model, so every context window sees them
+        extra_reference_latents = None
+        if extra_reference_images is not None:
+            extras = comfy.utils.common_upscale(extra_reference_images.movedim(-1, 1), width, height, "area", "center").movedim(1, -1)[:, :, :, :3]
+            extra_reference_latents = torch.cat([vae.encode(extras[i:i + 1]) for i in range(extras.shape[0])], dim=2)
 
         if continue_motion is None:
             image = torch.ones((length, height, width, 3)) * 0.5
@@ -1257,8 +1254,11 @@ class WanAnimateToVideo(io.ComfyNode):
 
         mask_refmotion = mask_refmotion.view(1, mask_refmotion.shape[2] // 4, 4, mask_refmotion.shape[3], mask_refmotion.shape[4]).transpose(1, 2)
         mask = torch.cat((mask, mask_refmotion), dim=2)
-        positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": concat_latent_image, "concat_mask": mask, "extra_ref_latents": extra_ref_latents})
-        negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": concat_latent_image, "concat_mask": mask, "extra_ref_latents": extra_ref_latents})
+        animate_cond = {"concat_latent_image": concat_latent_image, "concat_mask": mask}
+        if extra_reference_latents is not None:
+            animate_cond["extra_reference_latents"] = extra_reference_latents
+        positive = node_helpers.conditioning_set_values(positive, animate_cond)
+        negative = node_helpers.conditioning_set_values(negative, animate_cond)
 
         latent = torch.zeros([batch_size, 16, latent_length + trim_latent, latent_height, latent_width], device=comfy.model_management.intermediate_device())
         out_latent = {}
