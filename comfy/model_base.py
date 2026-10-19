@@ -1839,12 +1839,35 @@ class WAN22_Animate(WAN21):
         return out
 
     def resize_cond_for_context_window(self, cond_key, cond_value, window, x_in, device, retain_index_list=[]):
-        head_offset = 1 + self.diffusion_model.extra_ref_latents
+        prefix_frames = getattr(window, "context_prefix_frames", 0)
+        injected = prefix_frames > 0 and 0 not in window.index_list
+        if cond_key == "c_concat" and injected:
+            return self._slice_for_injected_window(cond_value, window, device, prefix_frames, include_prefix=True)
         if cond_key == "face_pixel_values":
-            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_scale=4, temporal_offset=head_offset)
+            if injected:
+                return self._slice_for_injected_window(cond_value, window, device, prefix_frames, temporal_scale=4, include_prefix=False)
+            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_scale=4, temporal_offset=prefix_frames)
         if cond_key == "pose_latents":
-            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_offset=head_offset)
+            if injected:
+                return self._slice_for_injected_window(cond_value, window, device, prefix_frames, include_prefix=False)
+            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_offset=prefix_frames)
         return super().resize_cond_for_context_window(cond_key, cond_value, window, x_in, device, retain_index_list=retain_index_list)
+
+    def _slice_for_injected_window(self, cond_value, window, device, prefix_frames, temporal_scale=1, include_prefix=True):
+        """Cond slice for a window that got the static prefix frames prepended to its latent.
+        Local layout is [prefix][anchor?][window frames]. c_concat must cover every local
+        frame; pose/face are consumed starting at the head offset, so they only carry the
+        anchor and window frames."""
+        cond = cond_value.cond
+        indices = list(window.index_list)
+        anchor = getattr(window, "causal_anchor_index", None)
+        if anchor is not None and anchor >= 0:
+            indices = [anchor] + indices
+        if temporal_scale > 1:
+            indices = [i * temporal_scale + k for i in indices for k in range(temporal_scale)]
+        if include_prefix:
+            indices = list(range(prefix_frames * temporal_scale)) + indices
+        return cond_value._copy_with(cond[(slice(None), slice(None), indices)].to(device))
 
 class WAN_Animate2(WAN21):
     def __init__(self, model_config, model_type=ModelType.FLOW, device=None):

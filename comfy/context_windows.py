@@ -223,6 +223,7 @@ class WindowingState:
     dim: int = 0                                 # primary modality temporal dim for context windowing
     is_multimodal: bool = False
     temporal_downscale_ratio: int = 1            # model's pixel-to-latent temporal compression ratio
+    prefix_frames: int = 0                       # static reference frames at the head of x (context_prefix_frames cond)
 
     def prepare_window(self, window: IndexListContextWindow, model) -> IndexListContextWindow:
         """Reformat window for multimodal contexts by deriving per-modality index lists.
@@ -452,7 +453,19 @@ class IndexListContextHandler(ContextHandlerABC):
             latent_shapes=latent_shapes,
             dim=self.dim,
             is_multimodal=is_multimodal,
-            temporal_downscale_ratio=model.latent_format.temporal_downscale_ratio)
+            temporal_downscale_ratio=model.latent_format.temporal_downscale_ratio,
+            prefix_frames=self._get_prefix_frames(conds))
+
+    def _get_prefix_frames(self, conds: list[list[dict]]) -> int:
+        """Number of static reference frames declared at the head of the latent sequence
+        via the raw 'context_prefix_frames' conditioning value (e.g. WanAnimate references)."""
+        for cond_list in conds:
+            if not cond_list:
+                continue
+            value = cond_list[0].get("context_prefix_frames", 0)
+            if value:
+                return int(value)
+        return 0
 
     def should_use_context(self, model: BaseModel, conds: list[list[dict]], x_in: torch.Tensor, timestep: torch.Tensor, model_options: dict[str]) -> bool:
         window_state = self._build_window_state(x_in, conds, model) # build window_state to check frame counts, will be built again in execute
@@ -668,6 +681,15 @@ class IndexListContextHandler(ContextHandlerABC):
             # slice the window for each modality, injecting guide frames where applicable
             sliced, guide_frame_counts_per_modality = window_state.slice_for_window(window, self.latent_retain_index_list, device)
 
+            # prepend the static prefix frames (e.g. WanAnimate references) to windows that don't
+            # already contain them, so every window sees the same reference context as the first
+            prefix_count = 0
+            if window_state.prefix_frames > 0 and 0 not in window.index_list:
+                prefix_count = window_state.prefix_frames
+                prefix = window_state.latents[0].narrow(self.dim, 0, prefix_count)
+                sliced[0] = torch.cat([prefix.to(device=sliced[0].device, dtype=sliced[0].dtype), sliced[0]], dim=self.dim)
+            window.context_prefix_frames = window_state.prefix_frames
+
             for callback in comfy.patcher_extension.get_all_callbacks(IndexListCallbacks.EVALUATE_CONTEXT_WINDOWS, self.callbacks):
                 callback(self, model, x_in, conds, timestep, model_options, window_idx, window, model_options, device, first_device)
 
@@ -694,6 +716,12 @@ class IndexListContextHandler(ContextHandlerABC):
 
             # unpack outputs
             out_per_modality = [comfy.utils.unpack_latents(sub_conds_out[i], sub_shapes) for i in range(len(sub_conds_out))]
+
+            # strip injected prefix frames before the anchor strip, which assumes the anchor is at position 0
+            if prefix_count > 0:
+                for ci in range(len(out_per_modality)):
+                    t = out_per_modality[ci][0]
+                    out_per_modality[ci][0] = t.narrow(self.dim, prefix_count, t.shape[self.dim] - prefix_count)
 
             # strip causal_window_fix anchor from primary modality before guide strip so window_len math stays correct
             if anchor_applied:

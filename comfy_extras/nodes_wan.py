@@ -1257,8 +1257,12 @@ class WanAnimateToVideo(io.ComfyNode):
 
         mask_refmotion = mask_refmotion.view(1, mask_refmotion.shape[2] // 4, 4, mask_refmotion.shape[3], mask_refmotion.shape[4]).transpose(1, 2)
         mask = torch.cat((mask, mask_refmotion), dim=2)
-        positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": concat_latent_image, "concat_mask": mask, "extra_ref_latents": extra_ref_latents})
-        negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": concat_latent_image, "concat_mask": mask, "extra_ref_latents": extra_ref_latents})
+        animate_cond = {"concat_latent_image": concat_latent_image, "concat_mask": mask, "extra_ref_latents": extra_ref_latents}
+        if extra_reference_images is not None:
+            # static head frames (main reference + extras) that every context window should see
+            animate_cond["context_prefix_frames"] = 1 + extra_ref_latents
+        positive = node_helpers.conditioning_set_values(positive, animate_cond)
+        negative = node_helpers.conditioning_set_values(negative, animate_cond)
 
         latent = torch.zeros([batch_size, 16, latent_length + trim_latent, latent_height, latent_width], device=comfy.model_management.intermediate_device())
         out_latent = {}
