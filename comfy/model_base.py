@@ -1840,7 +1840,7 @@ class WAN22_Animate(WAN21):
 
     def resize_cond_for_context_window(self, cond_key, cond_value, window, x_in, device, retain_index_list=[]):
         prefix_frames = getattr(window, "context_prefix_frames", 0)
-        injected = prefix_frames > 0 and 0 not in window.index_list
+        injected = prefix_frames > 0 and window.index_list[0] >= prefix_frames
         if cond_key == "c_concat" and injected:
             return self._slice_for_injected_window(cond_value, window, device, prefix_frames, include_prefix=True)
         if cond_key == "face_pixel_values":
@@ -1856,18 +1856,24 @@ class WAN22_Animate(WAN21):
     def _slice_for_injected_window(self, cond_value, window, device, prefix_frames, temporal_scale=1, include_prefix=True):
         """Cond slice for a window that got the static prefix frames prepended to its latent.
         Local layout is [prefix][anchor?][window frames]. c_concat must cover every local
-        frame; pose/face are consumed starting at the head offset, so they only carry the
-        anchor and window frames."""
+        frame (global indices); pose/face cover the generation frames only (global minus the
+        prefix head), are consumed starting at the head offset, and out-of-range tail
+        entries are dropped, mirroring slice_cond."""
         cond = cond_value.cond
         indices = list(window.index_list)
         anchor = getattr(window, "causal_anchor_index", None)
         if anchor is not None and anchor >= 0:
             indices = [anchor] + indices
-        if temporal_scale > 1:
-            indices = [i * temporal_scale + k for i in indices for k in range(temporal_scale)]
         if include_prefix:
-            indices = list(range(prefix_frames * temporal_scale)) + indices
-        return cond_value._copy_with(cond[(slice(None), slice(None), indices)].to(device))
+            cond_indices = list(range(prefix_frames)) + indices
+        else:
+            cond_indices = [i - prefix_frames for i in indices]
+        if temporal_scale > 1:
+            cond_indices = [i * temporal_scale + k for i in cond_indices for k in range(temporal_scale)]
+            if not include_prefix:
+                cond_size = cond.size(2)
+                cond_indices = [i for i in cond_indices if 0 <= i < cond_size]
+        return cond_value._copy_with(cond[(slice(None), slice(None), cond_indices)].to(device))
 
 class WAN_Animate2(WAN21):
     def __init__(self, model_config, model_type=ModelType.FLOW, device=None):

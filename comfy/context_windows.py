@@ -684,7 +684,7 @@ class IndexListContextHandler(ContextHandlerABC):
             # prepend the static prefix frames (e.g. WanAnimate references) to windows that don't
             # already contain them, so every window sees the same reference context as the first
             prefix_count = 0
-            if window_state.prefix_frames > 0 and 0 not in window.index_list:
+            if window_state.prefix_frames > 0 and window.index_list[0] >= window_state.prefix_frames:
                 prefix_count = window_state.prefix_frames
                 prefix = window_state.latents[0].narrow(self.dim, 0, prefix_count)
                 sliced[0] = torch.cat([prefix.to(device=sliced[0].device, dtype=sliced[0].dtype), sliced[0]], dim=self.dim)
