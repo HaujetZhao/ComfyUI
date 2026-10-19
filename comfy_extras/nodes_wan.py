@@ -1130,6 +1130,7 @@ class WanAnimateToVideo(io.ComfyNode):
                 io.Int.Input("batch_size", default=1, min=1, max=4096),
                 io.ClipVisionOutput.Input("clip_vision_output", optional=True),
                 io.Image.Input("reference_image", optional=True),
+                io.Image.Input("extra_reference_images", optional=True, tooltip="Additional reference images (as a batch) prepended to the reference latent context. The main reference_image stays adjacent to the generated video."),
                 io.Image.Input("face_video", optional=True),
                 io.Image.Input("pose_video", optional=True),
                 io.Int.Input("continue_motion_max_frames", default=5, min=1, max=nodes.MAX_RESOLUTION, step=4),
@@ -1150,7 +1151,7 @@ class WanAnimateToVideo(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, positive, negative, vae, width, height, length, batch_size, continue_motion_max_frames, video_frame_offset, reference_image=None, clip_vision_output=None, face_video=None, pose_video=None, continue_motion=None, background_video=None, character_mask=None) -> io.NodeOutput:
+    def execute(cls, positive, negative, vae, width, height, length, batch_size, continue_motion_max_frames, video_frame_offset, reference_image=None, extra_reference_images=None, clip_vision_output=None, face_video=None, pose_video=None, continue_motion=None, background_video=None, character_mask=None) -> io.NodeOutput:
         trim_to_pose_video = False
         latent_length = ((length - 1) // 4) + 1
         latent_width = width // 8
@@ -1162,6 +1163,16 @@ class WanAnimateToVideo(io.ComfyNode):
 
         image = comfy.utils.common_upscale(reference_image[:length].movedim(-1, 1), width, height, "area", "center").movedim(1, -1)
         concat_latent_image = vae.encode(image[:, :, :, :3])
+
+        # extra reference images each encode to one latent frame, prepended to the reference
+        # section of the context (kept before the main reference so it stays next to the video)
+        extra_ref_latents = 0
+        if extra_reference_images is not None:
+            extras = comfy.utils.common_upscale(extra_reference_images.movedim(-1, 1), width, height, "area", "center").movedim(1, -1)[:, :, :, :3]
+            extra_latent = torch.cat([vae.encode(extras[i:i + 1]) for i in range(extras.shape[0])], dim=2)
+            concat_latent_image = torch.cat((extra_latent, concat_latent_image), dim=2)
+            extra_ref_latents = extra_latent.shape[2]
+
         mask = torch.zeros((1, 4, concat_latent_image.shape[-3], concat_latent_image.shape[-2], concat_latent_image.shape[-1]), device=concat_latent_image.device, dtype=concat_latent_image.dtype)
         trim_latent += concat_latent_image.shape[2]
         ref_motion_latent_length = 0
@@ -1246,8 +1257,8 @@ class WanAnimateToVideo(io.ComfyNode):
 
         mask_refmotion = mask_refmotion.view(1, mask_refmotion.shape[2] // 4, 4, mask_refmotion.shape[3], mask_refmotion.shape[4]).transpose(1, 2)
         mask = torch.cat((mask, mask_refmotion), dim=2)
-        positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": concat_latent_image, "concat_mask": mask})
-        negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": concat_latent_image, "concat_mask": mask})
+        positive = node_helpers.conditioning_set_values(positive, {"concat_latent_image": concat_latent_image, "concat_mask": mask, "extra_ref_latents": extra_ref_latents})
+        negative = node_helpers.conditioning_set_values(negative, {"concat_latent_image": concat_latent_image, "concat_mask": mask, "extra_ref_latents": extra_ref_latents})
 
         latent = torch.zeros([batch_size, 16, latent_length + trim_latent, latent_height, latent_width], device=comfy.model_management.intermediate_device())
         out_latent = {}
