@@ -1,0 +1,899 @@
+{
+ "Context Big (rgthree)": {
+  "display_name": "Context Big (rgthree)",
+  "inputs": {
+   "base_ctx": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "model": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "clip": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "vae": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "positive": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "negative": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "latent": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "images": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "seed": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "steps": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "step_refiner": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "cfg": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "ckpt_name": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "sampler": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "scheduler": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "clip_width": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "clip_height": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "text_pos_g": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "text_pos_l": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "text_neg_g": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "text_neg_l": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "mask": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "control_net": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "RGTHREE_CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT",
+   "IMAGE",
+   "INT",
+   "INT",
+   "INT",
+   "FLOAT",
+   "[]",
+   "['euler', 'euler_cfg_pp', 'euler_ancestral', 'euler_ancestral_cfg_pp', 'heun', 'heunpp2', 'exp_heun_2_x0', 'exp_heun_2_x0_sde', 'dpm_2', 'dpm_2_ancestral', 'lms', 'dpm_fast', 'dpm_adaptive', 'dpmpp_2s_ancestral', 'dpmpp_2s_ancestral_cfg_pp', 'dpmpp_sde', 'dpmpp_sde_gpu', 'dpmpp_2m', 'dpmpp_2m_cfg_pp', 'dpmpp_2m_sde', 'dpmpp_2m_sde_gpu', 'dpmpp_2m_sde_heun', 'dpmpp_2m_sde_heun_gpu', 'dpmpp_3m_sde', 'dpmpp_3m_sde_gpu', 'ddpm', 'lcm', 'ipndm', 'ipndm_v', 'deis', 'cfgpp_ud10_ab', 'res_multistep', 'res_multistep_cfg_pp', 'res_multistep_ancestral', 'res_multistep_ancestral_cfg_pp', 'gradient_estimation', 'gradient_estimation_cfg_pp', 'er_sde', 'seeds_2', 'seeds_3', 'sa_solver', 'sa_solver_pece', 'ddim', 'uni_pc', 'uni_pc_bh2']",
+   "['simple', 'sgm_uniform', 'karras', 'exponential', 'ddim_uniform', 'beta', 'normal', 'linear_quadratic', 'kl_optimal']",
+   "INT",
+   "INT",
+   "STRING",
+   "STRING",
+   "STRING",
+   "STRING",
+   "MASK",
+   "CONTROL_NET"
+  ],
+  "output_names": [
+   "CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "POSITIVE",
+   "NEGATIVE",
+   "LATENT",
+   "IMAGE",
+   "SEED",
+   "STEPS",
+   "STEP_REFINER",
+   "CFG",
+   "CKPT_NAME",
+   "SAMPLER",
+   "SCHEDULER",
+   "CLIP_WIDTH",
+   "CLIP_HEIGHT",
+   "TEXT_POS_G",
+   "TEXT_POS_L",
+   "TEXT_NEG_G",
+   "TEXT_NEG_L",
+   "MASK",
+   "CONTROL_NET"
+  ],
+  "description": ""
+ },
+ "Context (rgthree)": {
+  "display_name": "Context (rgthree)",
+  "inputs": {
+   "base_ctx": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "model": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "clip": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "vae": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "positive": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "negative": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "latent": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "images": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "seed": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "RGTHREE_CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT",
+   "IMAGE",
+   "INT"
+  ],
+  "output_names": [
+   "CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "POSITIVE",
+   "NEGATIVE",
+   "LATENT",
+   "IMAGE",
+   "SEED"
+  ],
+  "description": ""
+ },
+ "Context Switch (rgthree)": {
+  "display_name": "Context Switch (rgthree)",
+  "inputs": {},
+  "outputs": [
+   "RGTHREE_CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT",
+   "IMAGE",
+   "INT"
+  ],
+  "output_names": [
+   "CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "POSITIVE",
+   "NEGATIVE",
+   "LATENT",
+   "IMAGE",
+   "SEED"
+  ],
+  "description": ""
+ },
+ "Context Switch Big (rgthree)": {
+  "display_name": "Context Switch Big (rgthree)",
+  "inputs": {},
+  "outputs": [
+   "RGTHREE_CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT",
+   "IMAGE",
+   "INT",
+   "INT",
+   "INT",
+   "FLOAT",
+   "[]",
+   "['euler', 'euler_cfg_pp', 'euler_ancestral', 'euler_ancestral_cfg_pp', 'heun', 'heunpp2', 'exp_heun_2_x0', 'exp_heun_2_x0_sde', 'dpm_2', 'dpm_2_ancestral', 'lms', 'dpm_fast', 'dpm_adaptive', 'dpmpp_2s_ancestral', 'dpmpp_2s_ancestral_cfg_pp', 'dpmpp_sde', 'dpmpp_sde_gpu', 'dpmpp_2m', 'dpmpp_2m_cfg_pp', 'dpmpp_2m_sde', 'dpmpp_2m_sde_gpu', 'dpmpp_2m_sde_heun', 'dpmpp_2m_sde_heun_gpu', 'dpmpp_3m_sde', 'dpmpp_3m_sde_gpu', 'ddpm', 'lcm', 'ipndm', 'ipndm_v', 'deis', 'cfgpp_ud10_ab', 'res_multistep', 'res_multistep_cfg_pp', 'res_multistep_ancestral', 'res_multistep_ancestral_cfg_pp', 'gradient_estimation', 'gradient_estimation_cfg_pp', 'er_sde', 'seeds_2', 'seeds_3', 'sa_solver', 'sa_solver_pece', 'ddim', 'uni_pc', 'uni_pc_bh2']",
+   "['simple', 'sgm_uniform', 'karras', 'exponential', 'ddim_uniform', 'beta', 'normal', 'linear_quadratic', 'kl_optimal']",
+   "INT",
+   "INT",
+   "STRING",
+   "STRING",
+   "STRING",
+   "STRING",
+   "MASK",
+   "CONTROL_NET"
+  ],
+  "output_names": [
+   "CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "POSITIVE",
+   "NEGATIVE",
+   "LATENT",
+   "IMAGE",
+   "SEED",
+   "STEPS",
+   "STEP_REFINER",
+   "CFG",
+   "CKPT_NAME",
+   "SAMPLER",
+   "SCHEDULER",
+   "CLIP_WIDTH",
+   "CLIP_HEIGHT",
+   "TEXT_POS_G",
+   "TEXT_POS_L",
+   "TEXT_NEG_G",
+   "TEXT_NEG_L",
+   "MASK",
+   "CONTROL_NET"
+  ],
+  "description": ""
+ },
+ "Context Merge (rgthree)": {
+  "display_name": "Context Merge (rgthree)",
+  "inputs": {},
+  "outputs": [
+   "RGTHREE_CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT",
+   "IMAGE",
+   "INT"
+  ],
+  "output_names": [
+   "CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "POSITIVE",
+   "NEGATIVE",
+   "LATENT",
+   "IMAGE",
+   "SEED"
+  ],
+  "description": ""
+ },
+ "Context Merge Big (rgthree)": {
+  "display_name": "Context Merge Big (rgthree)",
+  "inputs": {},
+  "outputs": [
+   "RGTHREE_CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "CONDITIONING",
+   "CONDITIONING",
+   "LATENT",
+   "IMAGE",
+   "INT",
+   "INT",
+   "INT",
+   "FLOAT",
+   "[]",
+   "['euler', 'euler_cfg_pp', 'euler_ancestral', 'euler_ancestral_cfg_pp', 'heun', 'heunpp2', 'exp_heun_2_x0', 'exp_heun_2_x0_sde', 'dpm_2', 'dpm_2_ancestral', 'lms', 'dpm_fast', 'dpm_adaptive', 'dpmpp_2s_ancestral', 'dpmpp_2s_ancestral_cfg_pp', 'dpmpp_sde', 'dpmpp_sde_gpu', 'dpmpp_2m', 'dpmpp_2m_cfg_pp', 'dpmpp_2m_sde', 'dpmpp_2m_sde_gpu', 'dpmpp_2m_sde_heun', 'dpmpp_2m_sde_heun_gpu', 'dpmpp_3m_sde', 'dpmpp_3m_sde_gpu', 'ddpm', 'lcm', 'ipndm', 'ipndm_v', 'deis', 'cfgpp_ud10_ab', 'res_multistep', 'res_multistep_cfg_pp', 'res_multistep_ancestral', 'res_multistep_ancestral_cfg_pp', 'gradient_estimation', 'gradient_estimation_cfg_pp', 'er_sde', 'seeds_2', 'seeds_3', 'sa_solver', 'sa_solver_pece', 'ddim', 'uni_pc', 'uni_pc_bh2']",
+   "['simple', 'sgm_uniform', 'karras', 'exponential', 'ddim_uniform', 'beta', 'normal', 'linear_quadratic', 'kl_optimal']",
+   "INT",
+   "INT",
+   "STRING",
+   "STRING",
+   "STRING",
+   "STRING",
+   "MASK",
+   "CONTROL_NET"
+  ],
+  "output_names": [
+   "CONTEXT",
+   "MODEL",
+   "CLIP",
+   "VAE",
+   "POSITIVE",
+   "NEGATIVE",
+   "LATENT",
+   "IMAGE",
+   "SEED",
+   "STEPS",
+   "STEP_REFINER",
+   "CFG",
+   "CKPT_NAME",
+   "SAMPLER",
+   "SCHEDULER",
+   "CLIP_WIDTH",
+   "CLIP_HEIGHT",
+   "TEXT_POS_G",
+   "TEXT_POS_L",
+   "TEXT_NEG_G",
+   "TEXT_NEG_L",
+   "MASK",
+   "CONTROL_NET"
+  ],
+  "description": ""
+ },
+ "Display Int (rgthree)": {
+  "display_name": "Display Int (rgthree)",
+  "inputs": {
+   "input": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [],
+  "description": ""
+ },
+ "Display Any (rgthree)": {
+  "display_name": "Display Any (rgthree)",
+  "inputs": {
+   "source": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [],
+  "description": ""
+ },
+ "Lora Loader Stack (rgthree)": {
+  "display_name": "Lora Loader Stack (rgthree)",
+  "inputs": {
+   "model": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "clip": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "lora_01": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "strength_01": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "lora_02": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "strength_02": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "lora_03": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "strength_03": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "lora_04": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "strength_04": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "MODEL",
+   "CLIP"
+  ],
+  "description": ""
+ },
+ "Seed (rgthree)": {
+  "display_name": "Seed (rgthree)",
+  "inputs": {
+   "seed": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "INT"
+  ],
+  "output_names": [
+   "SEED"
+  ],
+  "description": ""
+ },
+ "Image Inset Crop (rgthree)": {
+  "display_name": "Image Inset Crop (rgthree)",
+  "inputs": {
+   "image": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "measurement": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "left": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "right": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "top": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "bottom": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "IMAGE"
+  ],
+  "description": ""
+ },
+ "Power Prompt (rgthree)": {
+  "display_name": "Power Prompt (rgthree)",
+  "inputs": {
+   "prompt": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_model": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_clip": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_lora": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_embedding": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_saved": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "CONDITIONING",
+   "MODEL",
+   "CLIP",
+   "STRING"
+  ],
+  "output_names": [
+   "CONDITIONING",
+   "MODEL",
+   "CLIP",
+   "TEXT"
+  ],
+  "description": ""
+ },
+ "Power Prompt - Simple (rgthree)": {
+  "display_name": "Power Prompt - Simple (rgthree)",
+  "inputs": {
+   "prompt": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_clip": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_embedding": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_saved": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "CONDITIONING",
+   "STRING"
+  ],
+  "output_names": [
+   "CONDITIONING",
+   "TEXT"
+  ],
+  "description": ""
+ },
+ "KSampler Config (rgthree)": {
+  "display_name": "KSampler Config (rgthree)",
+  "inputs": {
+   "steps_total": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "refiner_step": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "cfg": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "sampler_name": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "scheduler": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "INT",
+   "INT",
+   "FLOAT",
+   "['euler', 'euler_cfg_pp', 'euler_ancestral', 'euler_ancestral_cfg_pp', 'heun', 'heunpp2', 'exp_heun_2_x0', 'exp_heun_2_x0_sde', 'dpm_2', 'dpm_2_ancestral', 'lms', 'dpm_fast', 'dpm_adaptive', 'dpmpp_2s_ancestral', 'dpmpp_2s_ancestral_cfg_pp', 'dpmpp_sde', 'dpmpp_sde_gpu', 'dpmpp_2m', 'dpmpp_2m_cfg_pp', 'dpmpp_2m_sde', 'dpmpp_2m_sde_gpu', 'dpmpp_2m_sde_heun', 'dpmpp_2m_sde_heun_gpu', 'dpmpp_3m_sde', 'dpmpp_3m_sde_gpu', 'ddpm', 'lcm', 'ipndm', 'ipndm_v', 'deis', 'cfgpp_ud10_ab', 'res_multistep', 'res_multistep_cfg_pp', 'res_multistep_ancestral', 'res_multistep_ancestral_cfg_pp', 'gradient_estimation', 'gradient_estimation_cfg_pp', 'er_sde', 'seeds_2', 'seeds_3', 'sa_solver', 'sa_solver_pece', 'ddim', 'uni_pc', 'uni_pc_bh2']",
+   "['simple', 'sgm_uniform', 'karras', 'exponential', 'ddim_uniform', 'beta', 'normal', 'linear_quadratic', 'kl_optimal']"
+  ],
+  "output_names": [
+   "STEPS",
+   "REFINER_STEP",
+   "CFG",
+   "SAMPLER",
+   "SCHEDULER"
+  ],
+  "description": ""
+ },
+ "SDXL Empty Latent Image (rgthree)": {
+  "display_name": "SDXL Empty Latent Image (rgthree)",
+  "inputs": {
+   "dimensions": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "clip_scale": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "batch_size": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "LATENT",
+   "INT",
+   "INT"
+  ],
+  "output_names": [
+   "LATENT",
+   "CLIP_WIDTH",
+   "CLIP_HEIGHT"
+  ],
+  "description": ""
+ },
+ "SDXL Power Prompt - Positive (rgthree)": {
+  "display_name": "SDXL Power Prompt - Positive (rgthree)",
+  "inputs": {
+   "prompt_g": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "prompt_l": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_model": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_clip": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_clip_width": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_clip_height": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_lora": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_embedding": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_saved": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "target_width": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "target_height": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "crop_width": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "crop_height": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "CONDITIONING",
+   "MODEL",
+   "CLIP",
+   "STRING",
+   "STRING"
+  ],
+  "output_names": [
+   "CONDITIONING",
+   "MODEL",
+   "CLIP",
+   "TEXT_G",
+   "TEXT_L"
+  ],
+  "description": ""
+ },
+ "SDXL Power Prompt - Simple / Negative (rgthree)": {
+  "display_name": "SDXL Power Prompt - Simple / Negative (rgthree)",
+  "inputs": {
+   "prompt_g": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "prompt_l": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_clip": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_clip_width": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "opt_clip_height": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_embedding": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "insert_saved": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "target_width": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "target_height": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "crop_width": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "crop_height": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "CONDITIONING",
+   "STRING",
+   "STRING"
+  ],
+  "output_names": [
+   "CONDITIONING",
+   "TEXT_G",
+   "TEXT_L"
+  ],
+  "description": ""
+ },
+ "Any Switch (rgthree)": {
+  "display_name": "Any Switch (rgthree)",
+  "inputs": {},
+  "outputs": [
+   "*"
+  ],
+  "output_names": [
+   "*"
+  ],
+  "description": ""
+ },
+ "Image Comparer (rgthree)": {
+  "display_name": "Image Comparer (rgthree)",
+  "inputs": {
+   "image_a": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "image_b": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "IMAGE"
+  ],
+  "output_names": [
+   "images"
+  ],
+  "description": "Compares two images with a hover slider, or click from properties."
+ },
+ "Power Lora Loader (rgthree)": {
+  "display_name": "Power Lora Loader (rgthree)",
+  "inputs": {
+   "model": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "clip": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "MODEL",
+   "CLIP"
+  ],
+  "output_names": [
+   "MODEL",
+   "CLIP"
+  ],
+  "description": ""
+ },
+ "Power Primitive (rgthree)": {
+  "display_name": "Power Primitive (rgthree)",
+  "inputs": {},
+  "outputs": [
+   "*"
+  ],
+  "output_names": [
+   "*"
+  ],
+  "description": ""
+ },
+ "Image or Latent Size (rgthree)": {
+  "display_name": "Image or Latent Size (rgthree)",
+  "inputs": {},
+  "outputs": [
+   "INT",
+   "INT"
+  ],
+  "output_names": [
+   "WIDTH",
+   "HEIGHT"
+  ],
+  "description": ""
+ },
+ "Image Resize (rgthree)": {
+  "display_name": "Image Resize (rgthree)",
+  "inputs": {
+   "image": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "measurement": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "width": {
+    "tooltip": "The width of the desired resize. A pixel value if measurement is 'pixels' or a 100% scale percentage value if measurement is 'percentage'. Passing '0' will calculate the dimension based on the height.",
+    "display_name": null
+   },
+   "height": {
+    "tooltip": null,
+    "display_name": null
+   },
+   "fit": {
+    "tooltip": "'crop' resizes so the image covers the desired width and height, and center-crops the excess, returning exactly the desired width and height.\n'pad' resizes so the image fits inside the desired width and height, and fills the empty space returning exactly the desired width and height.\n'contain' resizes so the image fits inside the desired width and height, and returns the image with it's new size, with one side liekly smaller than the desired.\n\nNote, if either width or height is '0', the effective fit is 'contain'.",
+    "display_name": null
+   },
+   "method": {
+    "tooltip": null,
+    "display_name": null
+   }
+  },
+  "outputs": [
+   "IMAGE",
+   "INT",
+   "INT"
+  ],
+  "output_names": [
+   "IMAGE",
+   "WIDTH",
+   "HEIGHT"
+  ],
+  "description": "Resize the image."
+ },
+ "Power Puter (rgthree)": {
+  "display_name": "Power Puter (rgthree)",
+  "inputs": {},
+  "outputs": [
+   "*"
+  ],
+  "output_names": [
+   "*"
+  ],
+  "description": ""
+ }
+}

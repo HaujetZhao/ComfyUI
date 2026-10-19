@@ -33,6 +33,10 @@
 - 裸脚本复刻 server 显存行为的完整清单（aimdo 初始化顺序、sys.argv 注入、WDDM 溢出护栏等）：[doc/裸脚本复刻ComfyUI显存行为.md](doc/裸脚本复刻ComfyUI显存行为.md)，现成脚本 `my/vae_encode_vram_test.py`。
 - 仓库内临时加了 `[显存日志]` 埋点（cli_args.py 启动参数、execution.py 节点级、comfy/sd.py VAE encode/decode、comfy/ldm/wan/vae.py 时间块级），查完显存用 `git diff` 定位还原。
 
+## 第三方节点中文翻译
+
+- 给 custom_nodes 插件做界面翻译的规范（文件格式、下划线键、校验）：[doc/自定义节点界面翻译规范.md](doc/自定义节点界面翻译规范.md)。官方前端源码在 `E:\repos\ComfyUI_frontend`。
+
 ## StreamingVAE + StreamlinedAttention 补丁（2026-10 移植）
 
 - 分支 `streaming-vae-attention-0310`，基线 `535c16c`（2026-03-09/10），提交 `68992df`。源自 issue #1969 的 zip 补丁（`my/` 下有原件）。
@@ -41,5 +45,5 @@
 - 踩坑记录：
   - `wan_vae_stream.py` 的 `count_conv3d` 必须从 `comfy.ldm.wan.vae` 导入（老版布局）；`035414e`（3-17）重写了 vae.py 流式语义并删了这个函数，所以基线必须早于它。
   - 显存/RAM 泄漏排查套路：在补丁的 `print_vram` 里加 `Pinned / GPUCommit / RAMAvail` 三个量（`wan_attention_stream.py`，未提交），谁单调涨谁就是泄漏池；torch `Allocated` 平的不代表没事，问题都在 torch 之外的驱动层池子。
-  - 2026-10-17 现状：pinned 关掉后 RAM 仍缓慢流失（疑似 aimdo vbar mmap 页），下一步可试 `--disable-dynamic-vram`。
+  - 2026-10-19 定论：pinned 关掉后 RAM 缓慢增长不是泄漏，是 aimdo prefetch 的 vbar mmap 页，系统内存不够时会自动缩小，不用管（更不用试 `--disable-dynamic-vram`）。
 - 旧版 ComfyUI 配新版数据库会报 alembic `ResolutionError: 0003_add_metadata_job_id`（新版把 user 库升过级了），只影响资产库功能，不影响生成，忽略。
