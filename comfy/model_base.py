@@ -1840,17 +1840,20 @@ class WAN22_Animate(WAN21):
 
     def resize_cond_for_context_window(self, cond_key, cond_value, window, x_in, device, retain_index_list=[]):
         prefix_frames = getattr(window, "context_prefix_frames", 0)
+        # the timeline head always carries the main reference frame (plus extras when present);
+        # pose/face cond slices must skip it regardless of whether prefix injection is active
+        head_offset = 1 + self.diffusion_model.extra_ref_latents
         injected = prefix_frames > 0 and window.index_list[0] >= prefix_frames
         if cond_key == "c_concat" and injected:
             return self._slice_for_injected_window(cond_value, window, device, prefix_frames, include_prefix=True)
         if cond_key == "face_pixel_values":
             if injected:
                 return self._slice_for_injected_window(cond_value, window, device, prefix_frames, temporal_scale=4, include_prefix=False)
-            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_scale=4, temporal_offset=prefix_frames)
+            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_scale=4, temporal_offset=head_offset)
         if cond_key == "pose_latents":
             if injected:
                 return self._slice_for_injected_window(cond_value, window, device, prefix_frames, include_prefix=False)
-            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_offset=prefix_frames)
+            return comfy.context_windows.slice_cond(cond_value, window, x_in, device, temporal_dim=2, temporal_offset=head_offset)
         return super().resize_cond_for_context_window(cond_key, cond_value, window, x_in, device, retain_index_list=retain_index_list)
 
     def _slice_for_injected_window(self, cond_value, window, device, prefix_frames, temporal_scale=1, include_prefix=True):
