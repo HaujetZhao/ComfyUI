@@ -1164,13 +1164,13 @@ class WanAnimateToVideo(io.ComfyNode):
         image = comfy.utils.common_upscale(reference_image[:length].movedim(-1, 1), width, height, "area", "center").movedim(1, -1)
         concat_latent_image = vae.encode(image[:, :, :, :3])
 
-        # extra reference images each encode to one latent frame, prepended to the reference
-        # section of the context (kept before the main reference so it stays next to the video)
+        # extra reference images each encode to one latent frame, appended right after the
+        # main reference (which keeps its trained slot 0, matching WanAnimatePlus's layout)
         extra_ref_latents = 0
         if extra_reference_images is not None:
             extras = comfy.utils.common_upscale(extra_reference_images.movedim(-1, 1), width, height, "area", "center").movedim(1, -1)[:, :, :, :3]
             extra_latent = torch.cat([vae.encode(extras[i:i + 1]) for i in range(extras.shape[0])], dim=2)
-            concat_latent_image = torch.cat((extra_latent, concat_latent_image), dim=2)
+            concat_latent_image = torch.cat((concat_latent_image, extra_latent), dim=2)
             extra_ref_latents = extra_latent.shape[2]
 
         mask = torch.zeros((1, 4, concat_latent_image.shape[-3], concat_latent_image.shape[-2], concat_latent_image.shape[-1]), device=concat_latent_image.device, dtype=concat_latent_image.dtype)
